@@ -1,87 +1,199 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Bulk QR Code Generator</title>
+  <meta charset="utf-8"/>
+  <title>Bulk QR Generator + Admin Controls</title>
 
+  <!-- QR + ZIP libs -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 
   <style>
-    body { font-family: Arial; padding: 20px; }
-    .qr-box { display: inline-block; margin: 15px; text-align: center; }
+    body { font-family: Arial, sans-serif; padding: 18px; max-width:900px; margin:auto; }
+    .qr-box { display:inline-block; margin:12px; text-align:center; }
+    #controls { margin-bottom:10px; }
+    .admin { margin-top:18px; }
+    .btn { padding:8px 12px; margin-right:8px; cursor:pointer; border-radius:6px; border:1px solid #888; background:#f4f4f4; }
+    #status { margin-top:12px; color:#333; }
   </style>
 </head>
-
 <body>
-<h2>Bulk QR Code Generator</h2>
-<p>Upload CSV → Generate QR → Download ZIP</p>
+  <h2>Bulk QR Code Generator</h2>
+  <div id="controls">
+    <input type="file" id="csvFile" accept=".csv" />
+    <button class="btn" id="genBtn">Generate QR Codes</button>
+    <button class="btn" id="downloadZipBtn" style="display:none;">Download All as ZIP</button>
+  </div>
 
-<input type="file" id="csvFile" accept=".csv" />
-<button onclick="generateQRCodes()">Generate QR Codes</button>
+  <div class="admin">
+    <button class="btn" id="signinBtn">Admin Sign In</button>
+    <button class="btn" id="clearBtn">Clear Entries (attendance collection)</button>
+  </div>
 
-<div id="qrContainer"></div>
-<button id="downloadZipBtn" style="display:none;" onclick="downloadZip()">Download All as ZIP</button>
+  <div id="status"></div>
+  <div id="qrContainer"></div>
 
-<script>
-let qrDataArray = [];
+  <!-- Firebase modular SDK -->
+  <script type="module">
+    // --------- FIREBASE: paste your config here ----------
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
+    import { getFirestore, collection, getDocs, writeBatch, query, limit } 
+      from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
+    import { getAuth, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js";
 
-function secureHash(text) {
-    return btoa(text + "_SECRETKEY_2025");
-}
-
-function generateQRCodes() {
-    const file = document.getElementById("csvFile").files[0];
-    if (!file) return alert("Upload CSV!");
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const rows = e.target.result.split("\n");
-        qrDataArray = [];
-        document.getElementById("qrContainer").innerHTML = "";
-
-        for (let i = 1; i < rows.length; i++) {
-            const cols = rows[i].split(",");
-            if (cols.length < 2) continue;
-
-            const id = cols[0].trim();
-            const name = cols[1].trim();
-            const hash = secureHash(id);
-
-            const qrJSON = JSON.stringify({ id, name, hash });
-            qrDataArray.push({ id, name, qrJSON });
-
-            const box = document.createElement("div");
-            box.className = "qr-box";
-            box.innerHTML = `<strong>${name}</strong><br><div id="qr-${i}"></div>`;
-            document.getElementById("qrContainer").appendChild(box);
-
-            new QRCode(document.getElementById(`qr-${i}`), {
-                text: qrJSON,
-                width: 150,
-                height: 150
-            });
-        }
-
-        document.getElementById("downloadZipBtn").style.display = "block";
+    const firebaseConfig = {
+    apiKey: "AIzaSyB-cRwUJ8zcb1pWbToYXMtZg76vjhTMUPs",
+    authDomain: "attendance-system-b1d37.firebaseapp.com",
+    projectId: "attendance-system-b1d37",
+    storageBucket: "attendance-system-b1d37.firebasestorage.app",
+    messagingSenderId: "298377818582",
+    appId: "1:298377818582:web:48222962ad7981828f3477"
     };
 
-    reader.readAsText(file);
-}
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
 
-function downloadZip() {
-    let zip = new JSZip();
-    const images = document.querySelectorAll(".qr-box img");
+    // --------- QR generation logic ----------
+    const genBtn = document.getElementById('genBtn');
+    const csvFile = document.getElementById('csvFile');
+    const qrContainer = document.getElementById('qrContainer');
+    const downloadZipBtn = document.getElementById('downloadZipBtn');
+    const statusDiv = document.getElementById('status');
 
-    images.forEach((img, index) => {
-        const data = img.src.split(",")[1];
-        zip.file(`QR_${index+1}.png`, data, { base64: true });
+    let generatedImageElements = [];
+
+    function secureHash(text) {
+      // simple client-side hash for tamper-evidence; can be improved
+      return btoa(text + "_SECRETKEY_2025");
+    }
+
+    genBtn.onclick = () => {
+      const file = csvFile.files[0];
+      if (!file) return alert("Please upload a CSV file first (header: id,name).");
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const rows = e.target.result.split(/\r?\n/);
+        // first non-empty line should be header
+        let startIndex = 0;
+        // if header contains "id" and "name" keep startIndex = 1
+        if (rows.length > 0 && rows[0].toLowerCase().includes('id') && rows[0].toLowerCase().includes('name')) {
+          startIndex = 1;
+        }
+        qrContainer.innerHTML = "";
+        generatedImageElements = [];
+        for (let i = startIndex; i < rows.length; i++) {
+          if (!rows[i].trim()) continue;
+          // split by comma - tolerate extra commas in name by only using first two columns
+          const cols = rows[i].split(',');
+          if (cols.length < 2) continue;
+          const id = cols[0].trim();
+          const name = cols[1].trim();
+          const hash = secureHash(id);
+          const qrJSON = JSON.stringify({ id, name, hash });
+          const div = document.createElement('div');
+          div.className = 'qr-box';
+          const qrId = 'qr-' + i;
+          div.innerHTML = `<div><strong>${name}</strong><div id="${qrId}"></div></div>`;
+          qrContainer.appendChild(div);
+          // generate QR (creates an img or canvas inside)
+          new QRCode(document.getElementById(qrId), { text: qrJSON, width:150, height:150 });
+          // capture the generated image element (the lib uses either <img> or <canvas>)
+          const el = document.getElementById(qrId).querySelector('img,canvas');
+          if (el) generatedImageElements.push(el);
+        }
+        if (generatedImageElements.length) {
+          downloadZipBtn.style.display = 'inline-block';
+          statusDiv.innerText = `Generated ${generatedImageElements.length} QR(s).`;
+        } else {
+          statusDiv.innerText = 'No valid rows found in CSV (expect header id,name and rows).';
+        }
+      };
+      reader.readAsText(file);
+    };
+
+    downloadZipBtn.onclick = async () => {
+      statusDiv.innerText = 'Preparing ZIP...';
+      const zip = new JSZip();
+      for (let i = 0; i < generatedImageElements.length; i++) {
+        const el = generatedImageElements[i];
+        let dataUrl;
+        if (el.tagName.toLowerCase() === 'img') {
+          dataUrl = el.src;
+        } else {
+          dataUrl = el.toDataURL('image/png');
+        }
+        const base64 = dataUrl.split(',')[1];
+        zip.file(`QR_${i+1}.png`, base64, { base64: true });
+      }
+      const blob = await zip.generateAsync({ type: 'blob' });
+      saveAs(blob, 'QR_Codes.zip');
+      statusDiv.innerText = 'ZIP ready.';
+    };
+
+    // --------- Admin sign-in & clear entries ----------
+    const signinBtn = document.getElementById('signinBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    let isSignedIn = false;
+    let currentUserEmail = null;
+
+    signinBtn.onclick = async () => {
+      // prompt for admin email/password (simple flow)
+      const email = prompt("Admin email:");
+      if (!email) return;
+      const password = prompt("Password for " + email + " (will be used only for this session):");
+      if (!password) return;
+      statusDiv.innerText = 'Signing in...';
+      try {
+        const userCred = await signInWithEmailAndPassword(auth, email, password);
+        isSignedIn = true;
+        currentUserEmail = userCred.user.email;
+        statusDiv.innerText = 'Signed in as ' + currentUserEmail;
+      } catch (err) {
+        console.error(err);
+        statusDiv.innerText = 'Sign-in failed: ' + err.message;
+        alert('Sign-in failed: ' + err.message);
+      }
+    };
+
+    clearBtn.onclick = async () => {
+      if (!isSignedIn) {
+        alert('You must sign in as an admin before clearing entries.');
+        return;
+      }
+      if (!confirm('This will DELETE ALL attendance records permanently. Proceed?')) return;
+      statusDiv.innerText = 'Clearing attendance...';
+      try {
+        // Delete in batches. Firestore has a 500 writes per batch limit.
+        const attendanceCol = collection(db, 'attendance');
+        let docsDeleted = 0;
+        while (true) {
+          // fetch up to 400 docs to be safe
+          const q = query(attendanceCol, limit(400));
+          const snap = await getDocs(q);
+          if (snap.empty) break;
+          const batch = writeBatch(db);
+          snap.docs.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+          docsDeleted += snap.size;
+          statusDiv.innerText = `Deleted ${docsDeleted} records...`;
+          // small pause to avoid rate limits
+          await new Promise(r => setTimeout(r, 200));
+        }
+        statusDiv.innerText = `Completed. Deleted ${docsDeleted} records.`;
+        alert('All attendance records cleared.');
+      } catch (err) {
+        console.error(err);
+        statusDiv.innerText = 'Error clearing: ' + err.message;
+        alert('Error clearing: ' + err.message);
+      }
+    };
+
+    // optional sign-out on page close
+    window.addEventListener('beforeunload', () => {
+      try { signOut(auth); } catch(e) {}
     });
-
-    zip.generateAsync({ type: "blob" }).then(content => {
-        saveAs(content, "QR_Codes.zip");
-    });
-}
-</script>
+  </script>
 </body>
 </html>
