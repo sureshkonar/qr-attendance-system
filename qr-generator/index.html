@@ -1,258 +1,161 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>QR Generator (Admin)</title>
-  <style>
-    body{font-family:Arial;background:#f5f7fa;padding:18px}
-    .card{max-width:980px;margin:auto;background:#fff;padding:18px;border-radius:10px;box-shadow:0 8px 26px rgba(0,0,0,0.06)}
-    h2{margin-top:0}
-    input,select,button{padding:10px;border-radius:6px;border:1px solid #ccc;font-size:14px}
-    .row{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
-    .col{flex:1;min-width:150px}
-    #qrPreview{display:flex;flex-wrap:wrap;margin-top:12px}
-    .qrCard{width:170px;margin:8px;padding:10px;text-align:center;background:#fafafa;border-radius:8px}
-    .qrCard img{width:140px;height:140px;object-fit:contain}
-    .controls{display:flex;gap:8px;margin-top:12px;align-items:center}
-    .controls button{cursor:pointer}
-    .hint{font-size:13px;color:#666;margin-top:8px}
-  </style>
+<meta charset="UTF-8">
+<title>QR Generator</title>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="../firebase.js"></script>
+<style>
+  #qrContainer img { margin: 5px; }
+  table, th, td { border: 1px solid black; border-collapse: collapse; padding: 5px; }
+</style>
 </head>
 <body>
+<h2>QR Generator - Attendance System</h2>
 
-<div class="card">
-  <h2>QR Code Generator — Admin</h2>
+<!-- Admin PIN -->
+<input type="password" id="adminPin" placeholder="Enter Admin PIN">
+<button onclick="verifyAdmin()">Verify PIN</button>
+<hr>
 
-  <p class="hint">CSV format (header): <code>EmpID,Name,mail,Bus</code> — order can vary but headers are required.</p>
+<!-- CSV Upload -->
+<input type="file" id="csvUpload" accept=".csv">
+<button onclick="processCSV()">Upload CSV & Generate QR</button>
+<hr>
 
-  <div style="margin-top:8px">
-    <input id="csvFile" type="file" accept=".csv"/>
-    <button id="loadCsv">Load CSV</button>
-  </div>
+<!-- QR Container -->
+<div id="qrContainer"></div>
 
-  <div style="margin-top:14px">
-    <strong>Add single entry</strong>
-    <div class="row">
-      <input id="newEmpID" class="col" placeholder="EmpID (e.g. EMP123)"/>
-      <input id="newName" class="col" placeholder="Full Name"/>
-      <input id="newMail" class="col" placeholder="Email"/>
-      <select id="newBus" style="min-width:140px">
-        <option>Bus 1</option><option>Bus 2</option><option>Bus 3</option><option>Bus 4</option><option>Bus 5</option>
-      </select>
-      <button id="addBtn">Add</button>
-    </div>
-  </div>
+<!-- Employee Table -->
+<h3>Employee List</h3>
+<table id="employeeTable">
+  <thead><tr><th>EmpID</th><th>Name</th><th>Mail</th><th>Bus</th><th>Actions</th></tr></thead>
+  <tbody></tbody>
+</table>
 
-  <div class="controls">
-    <button id="generateAll">Generate All QR</button>
-    <button id="downloadZip" style="display:none">Download ZIP (XLSX + PNGs)</button>
-    <button id="clearAttendance" style="background:#d9534f;color:#fff">Clear Attendance (Firestore)</button>
-    <button id="logoutBtn" style="margin-left:auto">Logout</button>
-  </div>
+<button onclick="saveToFirebase()">Save All to DB</button>
+<button onclick="deleteAllEntries()">Delete All</button>
 
-  <div id="status" class="hint"></div>
+<script>
+// Admin PIN hash (SHA256 of 1234)
+const adminHash = "03ac674216f3e15c761ee1a5e255f067953623c8f966f3b0b0ff9d4a7c1b6d1a";
+let adminVerified = false;
 
-  <div id="qrPreview"></div>
-</div>
-
-<!-- libs -->
-<script type="module" src="../firebase.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
-
-<script type="module">
-import { db } from '../firebase.js';
-import { doc, setDoc, collection, getDocs, writeBatch, query, limit, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
-const requireAdmin = () => {
-  if (localStorage.getItem('admin_logged_in') !== 'true') {
-    alert('Admin not logged in. Redirecting to login.');
-    window.location.href = '../admin-login.html';
-    return false;
-  }
-  return true;
-};
-
-if (!requireAdmin()) throw new Error('Not admin');
-
-const csvFile = document.getElementById('csvFile');
-const loadCsv = document.getElementById('loadCsv');
-const qrPreview = document.getElementById('qrPreview');
-const status = document.getElementById('status');
-const generateAll = document.getElementById('generateAll');
-const downloadZip = document.getElementById('downloadZip');
-const clearAttendance = document.getElementById('clearAttendance');
-const logoutBtn = document.getElementById('logoutBtn');
-const addBtn = document.getElementById('addBtn');
-
-let entries = []; // {empID,name,mail,bus,qrDataUrl}
-
-loadCsv.addEventListener('click', () => {
-  if (!csvFile.files.length) { alert('Select a CSV file'); return; }
-  const reader = new FileReader();
-  reader.onload = (e) => parseCSV(e.target.result);
-  reader.readAsText(csvFile.files[0]);
-});
-
-function parseCSV(text) {
-  const rows = text.split(/\r?\n/).map(r => r.trim()).filter(Boolean);
-  if (!rows.length) { alert('CSV empty'); return; }
-  const header = rows[0].split(',').map(h => h.trim().toLowerCase());
-  const idx = {
-    empid: header.indexOf('empid'),
-    name: header.indexOf('name'),
-    mail: header.indexOf('mail'),
-    bus: header.indexOf('bus')
-  };
-  // Validate header
-  if (idx.empid < 0 || idx.name < 0) {
-    alert('CSV must include headers EmpID and Name (and optionally mail, Bus)');
-    return;
-  }
-  entries = [];
-  for (let i=1;i<rows.length;i++){
-    const cols = rows[i].split(',');
-    const empID = (cols[idx.empid]||cols[0]||'').trim();
-    const name = (cols[idx.name]||cols[1]||'').trim();
-    const mail = (cols[idx.mail]||'').trim();
-    const bus = (cols[idx.bus]||'Bus 1').trim();
-    if (!empID || !name) continue;
-    entries.push({ empID, name, mail, bus });
-  }
-  status.textContent = `Loaded ${entries.length} entries`;
-  renderList();
+function sha256(str) {
+    return crypto.subtle.digest("SHA-256", new TextEncoder().encode(str))
+        .then(buf => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join(''));
 }
 
-function renderList(){
-  qrPreview.innerHTML = '';
-  entries.forEach((e,i) => {
-    const c = document.createElement('div'); c.className='qrCard';
-    c.innerHTML = `<div style="font-size:13px"><strong>${e.name}</strong><br><small>${e.empID}</small><br><small>${e.mail}</small><br><small>${e.bus}</small></div>
-      <div id="img-${i}">[not generated]</div>
-      <div style="margin-top:8px"><button onclick="generateOne(${i})">Gen</button>
-      <button onclick="downloadOne(${i})">DL</button>
-      <button onclick="saveEmp(${i})">Save→DB</button></div>`;
-    qrPreview.appendChild(c);
+async function verifyAdmin(){
+  const pin = document.getElementById("adminPin").value;
+  const hash = await sha256(pin);
+  if(hash === adminHash){
+    adminVerified = true;
+    alert("Admin verified!");
+    loadEmployees();
+  } else alert("Incorrect PIN");
+}
+
+// Store CSV entries temporarily
+let employees = [];
+
+function processCSV(){
+  if(!adminVerified){ alert("Verify admin first"); return; }
+  const file = document.getElementById("csvUpload").files[0];
+  if(!file){ alert("Select CSV"); return; }
+  Papa.parse(file, {
+    header: true,
+    complete: function(results){
+      employees = results.data;
+      displayEmployees();
+      generateQRCodes();
+    }
   });
-  downloadZip.style.display = 'none';
 }
 
-window.generateOne = async (i) => {
-  const e = entries[i];
-  const payload = JSON.stringify({ employeeID: e.empID, employeeName: e.name, mail: e.mail, bus: e.bus });
-  const dataUrl = await QRCode.toDataURL(payload, { width:360, margin:1 });
-  e.qrDataUrl = dataUrl;
-  document.getElementById('img-'+i).innerHTML = `<img src="${dataUrl}" style="width:140px;height:140px"/>`;
-  downloadZip.style.display = 'inline-block';
-};
-
-window.downloadOne = async (i) => {
-  if (!entries[i].qrDataUrl) await window.generateOne(i);
-  const blob = dataURLtoBlob(entries[i].qrDataUrl);
-  const fileName = sanitize(`${entries[i].name}_${entries[i].empID}.png`);
-  saveAs(blob, fileName);
-};
-
-window.saveEmp = async (i) => {
-  const e = entries[i];
-  try {
-    await setDoc(doc(db, 'employees', e.empID), {
-      employeeID: e.empID,
-      employeeName: e.name,
-      mail: e.mail,
-      bus: e.bus
-    });
-    alert('Saved employee metadata to Firestore (employees collection)');
-  } catch (err) {
-    console.error(err); alert('Save failed: '+err.message);
-  }
-};
-
-generateAll.addEventListener('click', async () => {
-  if (!entries.length) { alert('No entries'); return; }
-  status.textContent = 'Generating all QR images...';
-  for (let i=0;i<entries.length;i++){
-    if (!entries[i].qrDataUrl) {
-      const payload = JSON.stringify({ employeeID: entries[i].empID, employeeName: entries[i].name, mail: entries[i].mail, bus: entries[i].bus });
-      entries[i].qrDataUrl = await QRCode.toDataURL(payload, { width:360, margin:1 });
-    }
-    // also save employee metadata automatically
-    await setDoc(doc(db,'employees', entries[i].empID), {
-      employeeID: entries[i].empID,
-      employeeName: entries[i].name,
-      mail: entries[i].mail,
-      bus: entries[i].bus
-    });
-  }
-  status.textContent = 'Generated ' + entries.length + ' QR images';
-  renderList();
-  downloadZip.style.display = 'inline-block';
-});
-
-downloadZip.addEventListener('click', async () => {
-  const zip = new JSZip();
-  // xlsx sheet rows
-  const rows = [['EmpID','Name','Mail','Bus','QR_FileName']];
-  for (let i=0;i<entries.length;i++){
-    const e = entries[i];
-    const fname = sanitize(`${e.name}_${e.empID}.png`);
-    rows.push([e.empID, e.name, e.mail, e.bus, fname]);
-    if (!e.qrDataUrl) {
-      e.qrDataUrl = await QRCode.toDataURL(JSON.stringify({ employeeID:e.empID, employeeName:e.name, mail:e.mail, bus:e.bus}), { width:360, margin:1 });
-    }
-    const base64 = e.qrDataUrl.split(',')[1];
-    zip.file(fname, base64, { base64:true });
-  }
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb, ws, 'Employees');
-  const wbout = XLSX.write(wb, { bookType:'xlsx', type:'array' });
-  zip.file('employees.xlsx', wbout);
-  const blob = await zip.generateAsync({ type:'blob' });
-  saveAs(blob, 'QR_Employees.zip');
-});
-
-clearAttendance.addEventListener('click', async () => {
-  if (localStorage.getItem('admin_logged_in') !== 'true') { alert('Admin required'); window.location.href='../admin-login.html'; return; }
-  if (!confirm('Delete ALL documents from attendance collection? This cannot be undone.')) return;
-  status.textContent = 'Clearing Firestore attendance...';
-  try {
-    const colRef = collection(db, 'attendance');
-    while(true){
-      const q = query(colRef, limit(400));
-      const snap = await getDocs(q);
-      if (snap.empty) break;
-      const batch = writeBatch(db);
-      snap.docs.forEach(d => batch.delete(d.ref));
-      await batch.commit();
-    }
-    status.textContent = 'Attendance cleared.';
-    alert('Attendance cleared.');
-  } catch (err) {
-    console.error(err); alert('Error clearing: '+err.message);
-  }
-});
-
-logoutBtn.addEventListener('click', () => {
-  localStorage.removeItem('admin_logged_in');
-  window.location.href = '../admin-login.html';
-});
-
-/* Helpers */
-function dataURLtoBlob(dataURL){
-  const parts = dataURL.split(',');
-  const bstr = atob(parts[1]);
-  let n = bstr.length;
-  const u8 = new Uint8Array(n);
-  while(n--) u8[n] = bstr.charCodeAt(n);
-  return new Blob([u8], {type:'image/png'});
+function displayEmployees(){
+  const tbody = document.querySelector("#employeeTable tbody");
+  tbody.innerHTML = "";
+  employees.forEach((emp, idx)=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${emp.EmpID}</td><td>${emp.Name}</td><td>${emp.Mail}</td><td>${emp.Bus}</td>
+                    <td><button onclick="deleteEntry(${idx})">Delete</button></td>`;
+    tbody.appendChild(tr);
+  });
 }
-function sanitize(s){ return s.replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_\-\.]/g,''); }
+
+function generateQRCodes(){
+  const container = document.getElementById("qrContainer");
+  container.innerHTML = "";
+  employees.forEach(emp => {
+    const div = document.createElement("div");
+    div.id = "qr_"+emp.EmpID;
+    const qrData = JSON.stringify({employeeID: emp.EmpID, employeeName: emp.Name, mail: emp.Mail, bus: emp.Bus});
+    new QRCode(div, { text: qrData, width: 128, height: 128 });
+    const downloadBtn = document.createElement("button");
+    downloadBtn.innerText = "Download QR";
+    downloadBtn.onclick = ()=>downloadQRCode(div, emp);
+    div.appendChild(downloadBtn);
+    container.appendChild(div);
+  });
+}
+
+function downloadQRCode(div, emp){
+  const img = div.querySelector("img");
+  const link = document.createElement("a");
+  link.href = img.src;
+  link.download = `${emp.EmpID}_${emp.Name}.png`;
+  link.click();
+}
+
+// Delete a single entry
+function deleteEntry(idx){
+  if(confirm("Delete this entry?")){
+    employees.splice(idx,1);
+    displayEmployees();
+    generateQRCodes();
+  }
+}
+
+// Delete all entries
+function deleteAllEntries(){
+  if(!adminVerified){ alert("Verify admin first"); return; }
+  if(confirm("Delete ALL entries in DB?")){
+    const batch = db.batch();
+    db.collection("employees").get().then(snapshot=>{
+      snapshot.docs.forEach(doc=>{
+        batch.delete(doc.ref);
+      });
+      batch.commit().then(()=>alert("All employees deleted"));
+    });
+  }
+}
+
+// Save all entries to Firebase
+function saveToFirebase(){
+  if(!adminVerified){ alert("Verify admin first"); return; }
+  const batch = db.batch();
+  employees.forEach(emp=>{
+    const ref = db.collection("employees").doc(emp.EmpID);
+    batch.set(ref, {...emp, adminKey: adminHash});
+  });
+  batch.commit()
+    .then(()=>alert("Saved all employees to DB!"))
+    .catch(err=>alert("Save failed: "+err));
+}
+
+// Load existing employees from DB
+function loadEmployees(){
+  db.collection("employees").get().then(snapshot=>{
+    employees = snapshot.docs.map(doc=>doc.data());
+    displayEmployees();
+    generateQRCodes();
+  });
+}
 </script>
-<!-- Include Firebase scripts -->
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js"></script>
 <script src="../firebase.js"></script>
