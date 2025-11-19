@@ -1,10 +1,9 @@
-// firebase.js
-// This file initializes Firebase and provides the DB reference.
+// firebase.js (module) - place in repo root
+// IMPORTANT: Replace firebaseConfig values with your project's config.
 
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-// ----------------------------------------------
-// REPLACE WITH YOUR FIREBASE CONFIG
-// ----------------------------------------------
 const firebaseConfig = {
   apiKey: "AIzaSyB-cRwUJ8zcb1pWbToYXMtZg76vjhTMUPs",
   authDomain: "attendance-system-b1d37.firebaseapp.com",
@@ -14,14 +13,8 @@ const firebaseConfig = {
   appId: "1:298377818582:web:48222962ad7981828f3477"
 };
 
-// ----------------------------------------------
-// INITIALIZE ONLY ONCE
-// ----------------------------------------------
-if (!firebase.apps || firebase.apps.length === 0) {
-    firebase.initializeApp(firebaseConfig);
-}
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
-// ----------------------------------------------
-// EXPORT THE DATABASE REFERENCE
-// ----------------------------------------------
-const db = firebase.database();
+// Export Firestore DB for other modules
+export { db };

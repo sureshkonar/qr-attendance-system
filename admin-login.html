@@ -1,105 +1,66 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
 <head>
-<meta charset="UTF-8">
-<title>Admin Login</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-
-<style>
-    body {
-        font-family: Arial;
-        background: #f3f3f3;
-        padding: 40px;
-    }
-
-    .login-box {
-        max-width: 400px;
-        margin: auto;
-        background: white;
-        padding: 25px;
-        border-radius: 12px;
-        box-shadow: 0 0 12px rgba(0,0,0,0.15);
-        text-align: center;
-    }
-
-    input {
-        width: 100%;
-        padding: 12px;
-        margin-top: 12px;
-        border-radius: 6px;
-        border: 1px solid #ccc;
-        font-size: 15px;
-    }
-
-    button {
-        width: 100%;
-        padding: 12px;
-        background: #007bff;
-        color: white;
-        font-size: 16px;
-        border: none;
-        margin-top: 15px;
-        border-radius: 6px;
-        cursor: pointer;
-    }
-
-    button:hover {
-        background: #0056b3;
-    }
-
-    #err {
-        margin-top: 12px;
-        color: red;
-        display: none;
-    }
-</style>
-
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Admin Login</title>
+  <style>
+    body{font-family:Arial;margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#f3f4f6}
+    .box{width:320px;background:#fff;padding:20px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,0.08);text-align:center}
+    input{width:100%;padding:10px;margin-top:12px;border-radius:6px;border:1px solid #ccc;font-size:15px}
+    button{width:100%;padding:10px;margin-top:12px;border:0;border-radius:6px;background:#007bff;color:#fff;font-size:15px;cursor:pointer}
+    .msg{margin-top:10px;color:#d00;display:none}
+    .hint{font-size:13px;color:#666;margin-top:8px}
+  </style>
 </head>
-
 <body>
-
-<div class="login-box">
+  <div class="box">
     <h2>Admin Login</h2>
-
-    <input type="password" id="password" placeholder="Enter Admin Password">
-
-    <button onclick="login()">Login</button>
-
-    <p id="err">Invalid password</p>
-</div>
+    <input id="pinInput" type="password" placeholder="Enter Admin PIN (example: 1234)">
+    <button id="loginBtn">Login</button>
+    <p id="msg" class="msg">Incorrect PIN</p>
+    <p class="hint">This uses a simple client-side PIN. After successful login you'll be redirected to admin generator.</p>
+  </div>
 
 <script>
-// ------------------------------------------------------
-// HARD-CODED HASHED ADMIN PASSWORD
-// ------------------------------------------------------
-// Password = "team@290"  (example)
-// Hash generated using: SHA-256
-// You can change the password anytime.
+/*
+  Simple hashed-PIN check:
+  - Choose a PIN (e.g. "1234")
+  - Generate SHA-256 hash (we will compare hash client-side)
+  - Replace STORED_HASH with that hex string
+  - This keeps the raw PIN out of code reading at a glance (better than plain text).
+*/
 
-const PASSWORD_HASH = "8529b9b331e858239ee4975b602456e7e58da5523ed0a9f331a96d499301628b"; 
-// Replace with your actual SHA-256 hash
+// Replace this with SHA-256 hash of your chosen PIN.
+// Example: If PIN is "1234", compute SHA256("1234") and paste here.
+const STORED_HASH = "8529b9b331e858239ee4975b602456e7e58da5523ed0a9f331a96d499301628b"; // <-- replace
 
-// Compute SHA-256 hash of input text
-async function sha256(text) {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(text);
-    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+async function sha256(message) {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function login() {
-    const pass = document.getElementById("password").value;
-    const hashed = await sha256(pass);
-
-    if (hashed === PASSWORD_HASH) {
-        localStorage.setItem("admin_logged_in", "true");
-        window.location.href = "admin.html";
-    } else {
-        document.getElementById("err").style.display = "block";
-    }
-}
+document.getElementById('loginBtn').addEventListener('click', async () => {
+  const pin = document.getElementById('pinInput').value || '';
+  const msg = document.getElementById('msg');
+  const h = await sha256(pin);
+  if (h === STORED_HASH) {
+    // set admin flag (simple session)
+    localStorage.setItem('admin_logged_in','true');
+    // redirect to QR generator (admin area)
+    window.location.href = './qr-generator/index.html';
+  } else {
+    msg.style.display = 'block';
+    setTimeout(()=> msg.style.display='none', 2500);
+  }
+});
 </script>
+<!-- Include Firebase scripts -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js"></script>
+<script src="./firebase.js"></script>
 
 </body>
 </html>

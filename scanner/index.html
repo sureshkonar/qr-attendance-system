@@ -1,156 +1,132 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
 <head>
-<meta charset="UTF-8">
-<title>Attendance Scanner</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-
-<style>
-    body {
-        font-family: Arial, sans-serif;
-        text-align: center;
-        background: #f2f2f2;
-        padding: 20px;
-    }
-    
-    video {
-        width: 100%;
-        max-width: 400px;
-        margin-top: 25px;
-        border-radius: 12px;
-        box-shadow: 0 0 12px rgba(0,0,0,0.3);
-    }
-
-    #resultBox {
-        background: white;
-        padding: 15px;
-        margin-top: 25px;
-        border-radius: 10px;
-        display: none;
-        box-shadow: 0 0 12px rgba(0,0,0,0.15);
-    }
-
-    #resultBox.success {
-        border-left: 8px solid green;
-    }
-    #resultBox.duplicate {
-        border-left: 8px solid orange;
-    }
-</style>
+  <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Attendance Scanner</title>
+  <style>
+    body{font-family:Arial;background:#f6f8fa;padding:14px;text-align:center}
+    .card{max-width:720px;margin:auto;background:#fff;padding:14px;border-radius:10px}
+    #video{width:100%;max-width:480px;border-radius:8px;background:#000}
+    .controls{margin-top:12px}
+    .btn{padding:10px 14px;border-radius:8px;border:0;background:#007bff;color:#fff;cursor:pointer;margin:6px}
+    #status{margin-top:12px}
+  </style>
 </head>
-
 <body>
+<div class="card">
+  <h2>Attendance Scanner</h2>
+  <div class="controls">
+    <button id="startBtn" class="btn">Start Camera</button>
+    <button id="stopBtn" class="btn" style="background:#6c757d">Stop Camera</button>
+    <select id="volunteerName" style="padding:8px;border-radius:6px">
+      <option value="">Volunteer (optional)</option>
+      <option>Volunteer 1</option><option>Volunteer 2</option><option>Volunteer 3</option>
+    </select>
+  </div>
 
-<h2>Scan Your QR Code</h2>
-<p>Point your camera at the QR Code</p>
+  <video id="video" autoplay playsinline></video>
+  <div id="status"></div>
+</div>
 
-<video id="preview"></video>
-
-<div id="resultBox"></div>
-
-<!-- jsQR Library -->
 <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
+<script type="module" src="../firebase.js"></script>
 
-<!-- Firebase -->
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js"></script>
-<script src="../firebase.js"></script>
+<script type="module">
+import { db } from '../firebase.js';
+import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const video = document.getElementById('video');
+const statusDiv = document.getElementById('status');
 
-<script>
-// ------------------------------------------------
-// FIREBASE CONFIG
-// ------------------------------------------------
-const firebaseConfig = {
-  apiKey: "AIzaSyB-cRwUJ8zcb1pWbToYXMtZg76vjhTMUPs",
-  authDomain: "attendance-system-b1d37.firebaseapp.com",
-  projectId: "attendance-system-b1d37",
-  storageBucket: "attendance-system-b1d37.firebasestorage.app",
-  messagingSenderId: "298377818582",
-  appId: "1:298377818582:web:48222962ad7981828f3477"
-};
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
+let stream = null;
+let scanning = false;
+let lastData = '';
 
-// ------------------------------------------------
-// CAMERA + QR SCAN LOGIC
-// ------------------------------------------------
-
-const video = document.getElementById('preview');
-const resultBox = document.getElementById('resultBox');
-
-async function startCamera() {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+startBtn.addEventListener('click', async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
     video.srcObject = stream;
-    video.setAttribute("playsinline", true);
-    video.play();
-    scanLoop();
-}
+    scanning = true;
+    lastData = '';
+    tick();
+    statusDiv.textContent = 'Camera started. Point to QR';
+  } catch (err) {
+    alert('Camera access denied or not available: ' + err.message);
+  }
+});
 
-function scanLoop() {
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
+stopBtn.addEventListener('click', () => {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  scanning = false;
+  video.srcObject = null;
+  statusDiv.textContent = 'Camera stopped';
+});
 
-    requestAnimationFrame(scanLoop);
-
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, canvas.width, canvas.height);
-
-        if (code) {
-            handleScan(code.data);
-        }
+function tick(){
+  if (!scanning) return;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  const imgData = ctx.getImageData(0,0,canvas.width,canvas.height);
+  const code = jsQR(imgData.data, canvas.width, canvas.height, { inversionAttempts: 'attemptBoth' });
+  if (code && code.data) {
+    if (code.data !== lastData) {
+      lastData = code.data;
+      processScan(code.data);
+      setTimeout(()=> lastData = '', 1800); // allow same code again after timeout
     }
+  }
+  requestAnimationFrame(tick);
 }
 
-let lastScan = "";
+async function processScan(raw) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch(e){
+    statusDiv.textContent = 'Invalid QR format';
+    return;
+  }
+  const empID = parsed.employeeID || parsed.empId || parsed.id;
+  const name = parsed.employeeName || parsed.employeeName || parsed.name;
+  const mail = parsed.mail || '';
+  const bus = parsed.bus || 'Bus 1';
+  const volunteer = document.getElementById('volunteerName').value || 'Volunteer';
 
-function handleScan(raw) {
-    if (raw === lastScan) return;  
-    lastScan = raw;
+  if (!empID || !name) {
+    statusDiv.textContent = 'QR missing required fields';
+    return;
+  }
 
-    try {
-        const data = JSON.parse(raw);
-        const empID = data.employeeID;
-        const empName = data.employeeName;
-
-        const ref = db.ref("attendance/" + empID);
-
-        ref.once("value", snapshot => {
-            if (snapshot.exists()) {
-                showMessage(`Already Marked: ${empName}`, "duplicate");
-            } else {
-                ref.set({
-                    employeeID: empID,
-                    employeeName: empName,
-                    timestamp: new Date().toISOString()
-                });
-
-                showMessage(`Attendance Marked: ${empName}`, "success");
-            }
-        });
-
-    } catch (e) {
-        showMessage("Invalid QR Code", "duplicate");
-    }
-
-    setTimeout(() => { lastScan = ""; }, 2000);
+  const docRef = doc(db, 'attendance', empID);
+  const existing = await getDoc(docRef);
+  if (existing.exists()) {
+    statusDiv.textContent = `${name} (${empID}) — Already marked`;
+    return;
+  }
+  try {
+    await setDoc(docRef, {
+      employeeID: empID,
+      employeeName: name,
+      mail: mail,
+      bus: bus,
+      timestamp: new Date().toISOString(),
+      scannedBy: volunteer
+    });
+    statusDiv.textContent = `Marked: ${name} — ${bus}`;
+  } catch (err) {
+    console.error(err);
+    statusDiv.textContent = 'Error saving attendance: ' + err.message;
+  }
 }
-
-function showMessage(msg, type) {
-    resultBox.style.display = "block";
-    resultBox.className = "";
-    resultBox.classList.add(type);
-    resultBox.innerHTML = `<h3>${msg}</h3>`;
-}
-
-// Start the camera
-startCamera();
 </script>
+<!-- Include Firebase scripts -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js"></script>
+<script src="../firebase.js"></script>
 
 </body>
 </html>
