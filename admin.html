@@ -1,103 +1,107 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Admin Login</title>
-    <style>
-        body { 
-            font-family: Arial; 
-            max-width: 450px; 
-            margin: 30px auto; 
-            padding: 20px; 
-            border: 1px solid #ddd; 
-            border-radius: 10px;
-        }
-        #adminTools { display: none; margin-top: 25px; }
-        button { padding: 10px 20px; margin: 10px 0; cursor: pointer; }
-    </style>
+<meta charset="UTF-8">
+<title>Admin Login</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background: #f5f5f5;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+    }
+    .login-box {
+        width: 320px;
+        background: white;
+        padding: 25px;
+        border-radius: 10px;
+        box-shadow: 0 0 12px rgba(0,0,0,0.15);
+        text-align: center;
+    }
+    input {
+        width: 100%;
+        padding: 12px;
+        margin-top: 10px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+    }
+    button {
+        width: 100%;
+        padding: 12px;
+        background: #007bff;
+        color: white;
+        font-size: 16px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        margin-top: 15px;
+    }
+    button:hover {
+        background: #0056b3;
+    }
+    .error {
+        margin-top: 10px;
+        color: red;
+        font-size: 14px;
+        display: none;
+    }
+</style>
+
 </head>
 <body>
 
-<h2>Admin Login</h2>
-<p>Please enter Admin PIN:</p>
+<div class="login-box">
+    <h2>Admin Login</h2>
 
-<input type="password" id="pinInput" style="width: 100%; padding: 10px">
-<br><br>
-<button onclick="adminLogin()">Login</button>
+    <input type="password" id="password" placeholder="Enter Admin Password">
 
-<p id="error" style="color: red;"></p>
+    <button onclick="validateLogin()">Login</button>
 
-<div id="adminTools">
-    <h3>Admin Tools</h3>
-    <button onclick="clearAttendance()">Clear All Attendance</button>
-    <button onclick="window.location.href='download.html'">Download QR ZIP</button>
+    <div class="error" id="errorMsg">Invalid password</div>
 </div>
 
-<script type="module">
-    // --- FIREBASE SETUP ---
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, doc, getDoc, collection, getDocs, deleteDoc } 
-        from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-    const firebaseConfig = {
-    apiKey: "AIzaSyB-cRwUJ8zcb1pWbToYXMtZg76vjhTMUPs",
-    authDomain: "attendance-system-b1d37.firebaseapp.com",
-    projectId: "attendance-system-b1d37",
-    storageBucket: "attendance-system-b1d37.firebasestorage.app",
-    messagingSenderId: "298377818582",
-    appId: "1:298377818582:web:48222962ad7981828f3477"
-    };
+<script>
+// ----------------------------------------------------------
+//  STEP 1 — ADMIN PASSWORD HASH
+//  Your real admin password (example):   teamadmin123
+//  Hash generated using SHA-256
+// ----------------------------------------------------------
 
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
+// Replace this hash with your hash
+const STORED_HASH = "8529b9b331e858239ee4975b602456e7e58da5523ed0a9f331a96d499301628b";
 
-    // Hash function (SHA-256)
-    async function sha256(message) {
-        const msgBuffer = new TextEncoder().encode(message);
-        const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2,"0")).join("");
+// SHA-256 hashing function
+async function sha256(message) {
+    const msgBuffer = new TextEncoder().encode(message);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2,"0")).join("");
+}
+
+// Login validation
+async function validateLogin() {
+    const password = document.getElementById("password").value;
+    const errorMsg = document.getElementById("errorMsg");
+
+    const hash = await sha256(password);
+
+    if (hash === STORED_HASH) {
+        errorMsg.style.display = "none";
+
+        // Store session
+        localStorage.setItem("admin_logged_in", "true");
+
+        // Redirect to QR Generator page
+        window.location.href = "qr-generator/index.html";
+    } else {
+        errorMsg.style.display = "block";
     }
-
-    // --- LOGIN FUNCTION ---
-    async function adminLogin() {
-        const pin = document.getElementById("pinInput").value;
-        const enteredHash = await sha256(pin);
-
-        // Read stored hash from Firestore
-        const adminRef = doc(db, "configs", "admin");
-        const adminSnap = await getDoc(adminRef);
-
-        if (!adminSnap.exists()) {
-            document.getElementById("error").innerText = "Admin config missing in Firestore!";
-            return;
-        }
-
-        const storedHash = adminSnap.data().adminPinHash;
-
-        if (enteredHash === storedHash) {
-            document.getElementById("error").innerText = "";
-            document.getElementById("adminTools").style.display = "block";
-        } else {
-            document.getElementById("error").innerText = "Invalid PIN!";
-        }
-    }
-
-    // --- CLEAR ATTENDANCE FUNCTION ---
-    async function clearAttendance() {
-        if (!confirm("Are you sure? This will delete ALL attendance entries!")) return;
-
-        const attendanceRef = collection(db, "attendance");
-        const docsSnap = await getDocs(attendanceRef);
-
-        for (let d of docsSnap.docs) {
-            await deleteDoc(d.ref);
-        }
-
-        alert("All attendance cleared.");
-    }
-
-    window.adminLogin = adminLogin;
-    window.clearAttendance = clearAttendance;
+}
 </script>
 
 </body>
