@@ -1,15 +1,93 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+<meta charset="UTF-8">
 <title>Attendance Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
-<script type="module">
-import { initializeApp } 
-from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
+<style>
+    body {
+        font-family: Arial;
+        background: #f5f5f5;
+        padding: 20px;
+    }
 
-import { getFirestore, collection, onSnapshot } 
-from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
+    .box {
+        max-width: 800px;
+        margin: auto;
+        background: white;
+        padding: 25px;
+        border-radius: 12px;
+        box-shadow: 0 0 12px rgba(0,0,0,0.15);
+    }
 
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 15px;
+    }
+
+    th, td {
+        padding: 10px;
+        border-bottom: 1px solid #ddd;
+        text-align: left;
+    }
+
+    th {
+        background: #007bff;
+        color: white;
+    }
+
+    #search {
+        width: 100%;
+        padding: 10px;
+        font-size: 15px;
+        margin-bottom: 15px;
+    }
+
+    .countBox {
+        background: #007bff;
+        padding: 12px;
+        color: white;
+        border-radius: 6px;
+        text-align: center;
+        margin-bottom: 15px;
+    }
+</style>
+
+</head>
+
+<body>
+
+<div class="box">
+    <h2>Attendance Dashboard</h2>
+
+    <div class="countBox">
+        <h3>Total Present: <span id="count">0</span></h3>
+    </div>
+
+    <input type="text" id="search" placeholder="Search by name or ID..." onkeyup="filterTable()">
+
+    <table id="table">
+        <thead>
+            <tr>
+                <th>Employee ID</th>
+                <th>Name</th>
+                <th>Timestamp</th>
+            </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+    </table>
+</div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js"></script>
+
+<script>
+// ------------------------------------------------
+// FIREBASE CONFIG
+// ------------------------------------------------
 const firebaseConfig = {
   apiKey: "AIzaSyB-cRwUJ8zcb1pWbToYXMtZg76vjhTMUPs",
   authDomain: "attendance-system-b1d37.firebaseapp.com",
@@ -18,45 +96,49 @@ const firebaseConfig = {
   messagingSenderId: "298377818582",
   appId: "1:298377818582:web:48222962ad7981828f3477"
 };
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+// ------------------------------------------------
+// REALTIME DASHBOARD LISTENER
+// ------------------------------------------------
+const tbody = document.getElementById("tbody");
+const countBox = document.getElementById("count");
 
-onSnapshot(collection(db, "attendance"), (snapshot) => {
-    const count = snapshot.size;
-    document.getElementById("total").innerText = count;
+db.ref("attendance").on("value", snapshot => {
+    tbody.innerHTML = "";
+    let count = 0;
 
-    let busCount = {1:0,2:0,3:0,4:0,5:0};
+    snapshot.forEach(child => {
+        const data = child.val();
+        count++;
 
-    snapshot.forEach(doc => {
-        let bus = doc.data().bus.split(" ")[1];
-        busCount[bus]++;
+        const row = `
+            <tr>
+                <td>${data.employeeID}</td>
+                <td>${data.employeeName}</td>
+                <td>${new Date(data.timestamp).toLocaleString()}</td>
+            </tr>
+        `;
+        tbody.innerHTML += row;
     });
 
-    for (let i=1;i<=5;i++){
-        document.getElementById("bus"+i).innerText = busCount[i];
-    }
+    countBox.innerText = count;
 });
+
+// ------------------------------------------------
+// TABLE FILTER
+// ------------------------------------------------
+function filterTable() {
+    const query = document.getElementById("search").value.toLowerCase();
+    const rows = tbody.getElementsByTagName("tr");
+
+    for (let row of rows) {
+        const txt = row.innerText.toLowerCase();
+        row.style.display = txt.includes(query) ? "" : "none";
+    }
+}
 </script>
-<script type="module" src="../firebase.js"></script>
-
-
-<style>
-body { font-family: Arial; padding: 20px; }
-.box { padding: 10px; margin: 10px; background:#eee; border-radius: 10px; }
-</style>
-</head>
-
-<body>
-<h2>Live Attendance Dashboard</h2>
-
-<div class="box">Total Marked Attendees: <strong id="total">0</strong></div>
-
-<div class="box">Bus 1: <span id="bus1">0</span></div>
-<div class="box">Bus 2: <span id="bus2">0</span></div>
-<div class="box">Bus 3: <span id="bus3">0</span></div>
-<div class="box">Bus 4: <span id="bus4">0</span></div>
-<div class="box">Bus 5: <span id="bus5">0</span></div>
 
 </body>
 </html>

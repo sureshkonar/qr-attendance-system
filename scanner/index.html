@@ -1,93 +1,154 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Attendance Scanner</title>
-  <script src="https://unpkg.com/@zxing/library@latest"></script>
+<meta charset="UTF-8">
+<title>Attendance Scanner</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
-    import { getFirestore, doc, setDoc, getDoc, onSnapshot } 
-    from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
-
-    // -------------------------------------
-    // FIREBASE CONFIGURATION (SET YOUR KEYS)
-    // -------------------------------------
-    const firebaseConfig = {
-    apiKey: "AIzaSyB-cRwUJ8zcb1pWbToYXMtZg76vjhTMUPs",
-    authDomain: "attendance-system-b1d37.firebaseapp.com",
-    projectId: "attendance-system-b1d37",
-    storageBucket: "attendance-system-b1d37.firebasestorage.app",
-    messagingSenderId: "298377818582",
-    appId: "1:298377818582:web:48222962ad7981828f3477"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-
-    let selectedBus = "Bus 1";
-    function setBus(bus) {
-        selectedBus = bus;
-        alert("Bus selected: " + bus);
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+        background: #f2f2f2;
+        padding: 20px;
+    }
+    
+    video {
+        width: 100%;
+        max-width: 400px;
+        margin-top: 25px;
+        border-radius: 12px;
+        box-shadow: 0 0 12px rgba(0,0,0,0.3);
     }
 
-    async function markAttendance(id, name) {
-        const ref = doc(db, "attendance", id);
-        const existing = await getDoc(ref);
-
-        if (existing.exists()) {
-            alert("Already Marked: " + name);
-            return;
-        }
-
-        await setDoc(ref, {
-            name: name,
-            bus: selectedBus,
-            timestamp: new Date().toISOString()
-        });
-
-        alert("Marked: " + name);
+    #resultBox {
+        background: white;
+        padding: 15px;
+        margin-top: 25px;
+        border-radius: 10px;
+        display: none;
+        box-shadow: 0 0 12px rgba(0,0,0,0.15);
     }
 
-    window.onload = () => {
-        const codeReader = new ZXing.BrowserQRCodeReader();
-
-        document.getElementById("scanBtn").onclick = () => {
-            codeReader.decodeFromVideoDevice(undefined, "video", (result, err) => {
-                if (result) {
-                    let data = JSON.parse(result.text);
-                    markAttendance(data.id, data.name);
-                }
-            });
-        };
-    };
-  </script>
-  <script type="module" src="../firebase.js"></script>
-
-
-  <style>
-    body { font-family: Arial; padding: 20px; text-align: center; }
-    video { width: 90%; border: 2px solid black; }
-  </style>
+    #resultBox.success {
+        border-left: 8px solid green;
+    }
+    #resultBox.duplicate {
+        border-left: 8px solid orange;
+    }
+</style>
 </head>
 
 <body>
-<h2>Attendance Scanner</h2>
 
-<select onchange="setBus(this.value)">
-  <option>Bus 1</option>
-  <option>Bus 2</option>
-  <option>Bus 3</option>
-  <option>Bus 4</option>
-  <option>Bus 5</option>
-</select>
+<h2>Scan Your QR Code</h2>
+<p>Point your camera at the QR Code</p>
 
-<br><br>
+<video id="preview"></video>
 
-<button id="scanBtn">Start Scanning</button>
+<div id="resultBox"></div>
 
-<br><br>
+<!-- jsQR Library -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
 
-<video id="video"></video>
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js"></script>
+
+<script>
+// ------------------------------------------------
+// FIREBASE CONFIG
+// ------------------------------------------------
+const firebaseConfig = {
+  apiKey: "AIzaSyB-cRwUJ8zcb1pWbToYXMtZg76vjhTMUPs",
+  authDomain: "attendance-system-b1d37.firebaseapp.com",
+  projectId: "attendance-system-b1d37",
+  storageBucket: "attendance-system-b1d37.firebasestorage.app",
+  messagingSenderId: "298377818582",
+  appId: "1:298377818582:web:48222962ad7981828f3477"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// ------------------------------------------------
+// CAMERA + QR SCAN LOGIC
+// ------------------------------------------------
+
+const video = document.getElementById('preview');
+const resultBox = document.getElementById('resultBox');
+
+async function startCamera() {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    video.srcObject = stream;
+    video.setAttribute("playsinline", true);
+    video.play();
+    scanLoop();
+}
+
+function scanLoop() {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    requestAnimationFrame(scanLoop);
+
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, canvas.width, canvas.height);
+
+        if (code) {
+            handleScan(code.data);
+        }
+    }
+}
+
+let lastScan = "";
+
+function handleScan(raw) {
+    if (raw === lastScan) return;  
+    lastScan = raw;
+
+    try {
+        const data = JSON.parse(raw);
+        const empID = data.employeeID;
+        const empName = data.employeeName;
+
+        const ref = db.ref("attendance/" + empID);
+
+        ref.once("value", snapshot => {
+            if (snapshot.exists()) {
+                showMessage(`Already Marked: ${empName}`, "duplicate");
+            } else {
+                ref.set({
+                    employeeID: empID,
+                    employeeName: empName,
+                    timestamp: new Date().toISOString()
+                });
+
+                showMessage(`Attendance Marked: ${empName}`, "success");
+            }
+        });
+
+    } catch (e) {
+        showMessage("Invalid QR Code", "duplicate");
+    }
+
+    setTimeout(() => { lastScan = ""; }, 2000);
+}
+
+function showMessage(msg, type) {
+    resultBox.style.display = "block";
+    resultBox.className = "";
+    resultBox.classList.add(type);
+    resultBox.innerHTML = `<h3>${msg}</h3>`;
+}
+
+// Start the camera
+startCamera();
+</script>
 
 </body>
 </html>
