@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Bulk QR Code Generator</title>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+  <style>
+    body { font-family: Arial; padding: 20px; }
+    .qr-box { display: inline-block; margin: 15px; text-align: center; }
+  </style>
+</head>
+
+<body>
+<h2>Bulk QR Code Generator</h2>
+<p>Upload CSV → Generate QR → Download ZIP</p>
+
+<input type="file" id="csvFile" accept=".csv" />
+<button onclick="generateQRCodes()">Generate QR Codes</button>
+
+<div id="qrContainer"></div>
+<button id="downloadZipBtn" style="display:none;" onclick="downloadZip()">Download All as ZIP</button>
+
+<script>
+let qrDataArray = [];
+
+function secureHash(text) {
+    return btoa(text + "_SECRETKEY_2025");
+}
+
+function generateQRCodes() {
+    const file = document.getElementById("csvFile").files[0];
+    if (!file) return alert("Upload CSV!");
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const rows = e.target.result.split("\n");
+        qrDataArray = [];
+        document.getElementById("qrContainer").innerHTML = "";
+
+        for (let i = 1; i < rows.length; i++) {
+            const cols = rows[i].split(",");
+            if (cols.length < 2) continue;
+
+            const id = cols[0].trim();
+            const name = cols[1].trim();
+            const hash = secureHash(id);
+
+            const qrJSON = JSON.stringify({ id, name, hash });
+            qrDataArray.push({ id, name, qrJSON });
+
+            const box = document.createElement("div");
+            box.className = "qr-box";
+            box.innerHTML = `<strong>${name}</strong><br><div id="qr-${i}"></div>`;
+            document.getElementById("qrContainer").appendChild(box);
+
+            new QRCode(document.getElementById(`qr-${i}`), {
+                text: qrJSON,
+                width: 150,
+                height: 150
+            });
+        }
+
+        document.getElementById("downloadZipBtn").style.display = "block";
+    };
+
+    reader.readAsText(file);
+}
+
+function downloadZip() {
+    let zip = new JSZip();
+    const images = document.querySelectorAll(".qr-box img");
+
+    images.forEach((img, index) => {
+        const data = img.src.split(",")[1];
+        zip.file(`QR_${index+1}.png`, data, { base64: true });
+    });
+
+    zip.generateAsync({ type: "blob" }).then(content => {
+        saveAs(content, "QR_Codes.zip");
+    });
+}
+</script>
+</body>
+</html>
