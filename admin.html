@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Login</title>
+    <style>
+        body { 
+            font-family: Arial; 
+            max-width: 450px; 
+            margin: 30px auto; 
+            padding: 20px; 
+            border: 1px solid #ddd; 
+            border-radius: 10px;
+        }
+        #adminTools { display: none; margin-top: 25px; }
+        button { padding: 10px 20px; margin: 10px 0; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<h2>Admin Login</h2>
+<p>Please enter Admin PIN:</p>
+
+<input type="password" id="pinInput" style="width: 100%; padding: 10px">
+<br><br>
+<button onclick="adminLogin()">Login</button>
+
+<p id="error" style="color: red;"></p>
+
+<div id="adminTools">
+    <h3>Admin Tools</h3>
+    <button onclick="clearAttendance()">Clear All Attendance</button>
+    <button onclick="window.location.href='download.html'">Download QR ZIP</button>
+</div>
+
+<script type="module">
+    // --- FIREBASE SETUP ---
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getFirestore, doc, getDoc, collection, getDocs, deleteDoc } 
+        from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+    apiKey: "AIzaSyB-cRwUJ8zcb1pWbToYXMtZg76vjhTMUPs",
+    authDomain: "attendance-system-b1d37.firebaseapp.com",
+    projectId: "attendance-system-b1d37",
+    storageBucket: "attendance-system-b1d37.firebasestorage.app",
+    messagingSenderId: "298377818582",
+    appId: "1:298377818582:web:48222962ad7981828f3477"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // Hash function (SHA-256)
+    async function sha256(message) {
+        const msgBuffer = new TextEncoder().encode(message);
+        const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2,"0")).join("");
+    }
+
+    // --- LOGIN FUNCTION ---
+    async function adminLogin() {
+        const pin = document.getElementById("pinInput").value;
+        const enteredHash = await sha256(pin);
+
+        // Read stored hash from Firestore
+        const adminRef = doc(db, "configs", "admin");
+        const adminSnap = await getDoc(adminRef);
+
+        if (!adminSnap.exists()) {
+            document.getElementById("error").innerText = "Admin config missing in Firestore!";
+            return;
+        }
+
+        const storedHash = adminSnap.data().adminPinHash;
+
+        if (enteredHash === storedHash) {
+            document.getElementById("error").innerText = "";
+            document.getElementById("adminTools").style.display = "block";
+        } else {
+            document.getElementById("error").innerText = "Invalid PIN!";
+        }
+    }
+
+    // --- CLEAR ATTENDANCE FUNCTION ---
+    async function clearAttendance() {
+        if (!confirm("Are you sure? This will delete ALL attendance entries!")) return;
+
+        const attendanceRef = collection(db, "attendance");
+        const docsSnap = await getDocs(attendanceRef);
+
+        for (let d of docsSnap.docs) {
+            await deleteDoc(d.ref);
+        }
+
+        alert("All attendance cleared.");
+    }
+
+    window.adminLogin = adminLogin;
+    window.clearAttendance = clearAttendance;
+</script>
+
+</body>
+</html>
