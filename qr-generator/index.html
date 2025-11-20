@@ -88,53 +88,42 @@
     function resetState(){ employees = []; qrPreview.innerHTML=''; empTableBody.innerHTML=''; downloadZip.style.display='none'; status.textContent=''; }
     resetState();
 
-    // loadCsv.addEventListener('click', ()=> {
-    //   if(!csvFile.files.length){ alert('select CSV'); return; }
-    //   const f = csvFile.files[0];
-    //   Papa.parse(f, { header:true, skipEmptyLines:true, complete: (results) => {
-    //     const rows = results.data;
-    //     employees = rows.map(r => ({
-    //       empID: (r.EmpID || r.empID || r.id || '').trim(),
-    //       name: (r.Name || r.name || '').trim(),
-    //       mail: (r.mail || r.email || '').trim(),
-    //       bus: (r.Bus || r.bus || 'Bus 1').trim(),
-    //       qrDataUrl: null,
-    //       selected: false
-    //     })).filter(e => e.empID && e.name);
-    //     renderList();
-    //     status.textContent = `Loaded ${employees.length} entries`;
-    //   }});
-    // });
-
-    loadCsv.addEventListener('click', () => {
+    loadCsv.addEventListener("click", () => {
       if (!csvFile.files.length) {
-        alert('Select a CSV file first');
+        alert("Select CSV file");
         return;
       }
 
-      const f = csvFile.files[0];
+      const file = csvFile.files[0];
 
-      Papa.parse(f, {
+      Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
-
+        transformHeader: h => h.trim(),   // Clean headers
         complete: (results) => {
           const rows = results.data;
 
-          employees = rows.map(r => ({
-            empID: (r.EmpID || r.empID || r.ID || '').trim(),
-            name: (r.Name || r.name || '').trim(),
-            mail: (r.Mail || r.mail || r.Email || r.email || '').trim(),  // FIXED
-            bus: (r.Bus || r.bus || 'Bus 1').trim(),
-            qrDataUrl: null,
-            selected: false
-          })).filter(e =>
-            e.empID !== '' &&
-            e.name !== ''
-          );
+          employees = rows
+            .map(r => {
+              // Normalize keys — remove whitespace & lowercase everything
+              const normalized = {};
+              Object.keys(r).forEach(k => {
+                normalized[k.trim().toLowerCase()] = (r[k] || "").trim();
+              });
+
+              return {
+                empID: normalized["empid"] || normalized["id"] || "",
+                name: normalized["name"] || "",
+                mail: normalized["mail"] || normalized["email"] || "",
+                bus: normalized["bus"] || "Bus 1",
+                qrDataUrl: null,
+                selected: false
+              };
+            })
+            .filter(e => e.empID && e.name); // Remove blank rows
 
           renderList();
-          status.textContent = `Loaded ${employees.length} entries`;
+          status.textContent = `Loaded ${employees.length} employees`;
         }
       });
     });
