@@ -7,12 +7,12 @@
 </head>
 <body>
   <div class="header">
-    <div class="nav"><a href="../index.html">Dashboard</a><a href="./index.html">QR Generator</a><a href="../scanner/index.html">Scanner</a></div>
+    <div class="nav"><a href="../dashboard/index.html">Dashboard</a><a href="./index.html">QR Generator</a><a href="../scanner/index.html">Scanner</a></div>
   </div>
 
   <div class="container">
-    <h2>QR Generator - Admin</h2>
-    <p class="hint">CSV header must contain: <code>EmpID,Name,mail,Bus</code></p>
+    <h2>QR Generator — Admin</h2>
+    <p class="hint">CSV headers: EmpID,Name,mail,Bus (order can vary). Use admin account to sign in first.</p>
 
     <div class="controls">
       <input id="csvFile" type="file" accept=".csv">
@@ -36,8 +36,8 @@
 
     <div class="controls" style="margin-top:12px">
       <button id="saveAll" class="small-btn">Save All to Firestore</button>
-      <button id="delSelected" class="small-btn danger">Delete Selected</button>
-      <button id="delAll" class="small-btn danger">Delete All (Admin)</button>
+      <button id="delSelected" class="small-btn danger">Delete Selected (local)</button>
+      <button id="delAll" class="small-btn danger">Delete All from Firestore</button>
       <button id="logout" class="small-btn">Logout</button>
     </div>
 
@@ -52,186 +52,184 @@
   <!-- libs -->
   <script type="module" src="../firebase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.4.1/papaparse.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 
   <script type="module">
-  import { db } from '../firebase.js';
-  import { doc, setDoc, collection, getDocs, writeBatch, query, limit, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { auth, db } from '../firebase.js';
+    import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+    import { doc, setDoc, collection, getDocs, writeBatch, query, limit } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-  // admin check
-  if(localStorage.getItem('admin_logged_in') !== 'true'){
-    alert('Admin login required'); window.location.href='../admin-login.html';
-  }
-
-  const csvFile = document.getElementById('csvFile');
-  const loadCsv = document.getElementById('loadCsv');
-  const genAll = document.getElementById('genAll');
-  const downloadZip = document.getElementById('downloadZip');
-  const addBtn = document.getElementById('addBtn');
-  const saveAll = document.getElementById('saveAll');
-  const delSelected = document.getElementById('delSelected');
-  const delAll = document.getElementById('delAll');
-  const logout = document.getElementById('logout');
-  const qrPreview = document.getElementById('qrPreview');
-  const status = document.getElementById('status');
-  const empTableBody = document.querySelector('#empTable tbody');
-
-  let employees = []; // {empID,name,mail,bus,qrDataUrl,selected}
-
-  function resetState(){ employees = []; qrPreview.innerHTML=''; empTableBody.innerHTML=''; downloadZip.style.display='none'; status.textContent=''; }
-  resetState();
-
-  loadCsv.addEventListener('click', ()=> {
-    if(!csvFile.files.length){ alert('select CSV'); return; }
-    const f = csvFile.files[0];
-    const r = new FileReader();
-    r.onload = e => parseCSV(e.target.result);
-    r.readAsText(f);
-  });
-
-  function parseCSV(text){
-    const rows = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-    if(rows.length < 2){ alert('CSV needs at least header + 1 row'); return; }
-    const header = rows[0].split(',').map(h=>h.trim().toLowerCase());
-    const idx = { empid: header.indexOf('empid'), name: header.indexOf('name'), mail: header.indexOf('mail'), bus: header.indexOf('bus') };
-    if(idx.empid < 0 || idx.name < 0){ alert('CSV must contain EmpID and Name headers'); return; }
-    employees = [];
-    for(let i=1;i<rows.length;i++){
-      const cols = rows[i].split(',').map(c=>c.trim());
-      const empID = cols[idx.empid] || cols[0] || '';
-      const name = cols[idx.name] || cols[1] || '';
-      const mail = cols[idx.mail] || '';
-      const bus = cols[idx.bus] || 'Bus 1';
-      if(!empID || !name) continue;
-      employees.push({ empID, name, mail, bus, qrDataUrl:null, selected:false });
-    }
-    renderList();
-    status.textContent = `Loaded ${employees.length} entries`;
-  }
-
-  function renderList(){
-    qrPreview.innerHTML=''; empTableBody.innerHTML='';
-    employees.forEach((e,i)=>{
-      const card = document.createElement('div'); card.className='qr-card';
-      card.innerHTML = `<div style="font-size:13px"><strong>${e.name}</strong><br><small>${e.empID}</small><br><small>${e.mail}</small><br><small>${e.bus}</small></div><div id="img-${i}">[QR]</div>
-        <div style="margin-top:6px"><button onclick="genOne(${i})" class="small-btn">Gen</button><button onclick="dlOne(${i})" class="small-btn">DL</button></div>`;
-      qrPreview.appendChild(card);
-
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td><input type="checkbox" onchange="toggleSel(${i},this.checked)"></td><td>${e.empID}</td><td>${e.name}</td><td>${e.mail}</td><td>${e.bus}</td>`;
-      empTableBody.appendChild(tr);
+    // Ensure admin logged in
+    onAuthStateChanged(auth, user => {
+      if(!user) {
+        alert('Admin not signed in. Redirecting to login.');
+        window.location.href = '../admin-login.html';
+      }
     });
-  }
 
-  window.toggleSel = (i,val)=> employees[i].selected = val;
+    const csvFile = document.getElementById('csvFile');
+    const loadCsv = document.getElementById('loadCsv');
+    const genAll = document.getElementById('genAll');
+    const downloadZip = document.getElementById('downloadZip');
+    const addBtn = document.getElementById('addBtn');
+    const saveAll = document.getElementById('saveAll');
+    const delSelected = document.getElementById('delSelected');
+    const delAll = document.getElementById('delAll');
+    const logout = document.getElementById('logout');
+    const qrPreview = document.getElementById('qrPreview');
+    const status = document.getElementById('status');
+    const empTableBody = document.querySelector('#empTable tbody');
 
-  window.genOne = async (i) => {
-    const e = employees[i];
-    const payload = JSON.stringify({ employeeID: e.empID, employeeName: e.name, mail: e.mail, bus: e.bus });
-    e.qrDataUrl = await QRCode.toDataURL(payload, { width:360, margin:1 });
-    document.getElementById('img-'+i).innerHTML = `<img src="${e.qrDataUrl}" style="width:140px;height:140px">`;
-    downloadZip.style.display='inline-block';
-  };
+    let employees = []; // {empID,name,mail,bus,qrDataUrl,selected}
 
-  window.dlOne = async (i) => {
-    if(!employees[i].qrDataUrl) await window.genOne(i);
-    const blob = dataURLtoBlob(employees[i].qrDataUrl);
-    const fname = sanitize(`${employees[i].name}_${employees[i].empID}.png`);
-    saveAs(blob, fname);
-  };
+    function resetState(){ employees = []; qrPreview.innerHTML=''; empTableBody.innerHTML=''; downloadZip.style.display='none'; status.textContent=''; }
+    resetState();
 
-  genAll.addEventListener('click', async ()=> {
-    if(!employees.length){ alert('No entries'); return; }
-    status.textContent = 'Generating QR...';
-    for(let i=0;i<employees.length;i++){
-      if(!employees[i].qrDataUrl){
-        const p = JSON.stringify({ employeeID: employees[i].empID, employeeName: employees[i].name, mail: employees[i].mail, bus: employees[i].bus });
-        employees[i].qrDataUrl = await QRCode.toDataURL(p, { width:360, margin:1 });
-        document.getElementById('img-'+i).innerHTML = `<img src="${employees[i].qrDataUrl}" style="width:140px;height:140px">`;
-      }
-    }
-    status.textContent = 'Generated QR for all';
-    downloadZip.style.display='inline-block';
-  });
+    loadCsv.addEventListener('click', ()=> {
+      if(!csvFile.files.length){ alert('select CSV'); return; }
+      const f = csvFile.files[0];
+      Papa.parse(f, { header:true, skipEmptyLines:true, complete: (results) => {
+        const rows = results.data;
+        employees = rows.map(r => ({
+          empID: (r.EmpID || r.empID || r.id || '').trim(),
+          name: (r.Name || r.name || '').trim(),
+          mail: (r.mail || r.email || '').trim(),
+          bus: (r.Bus || r.bus || 'Bus 1').trim(),
+          qrDataUrl: null,
+          selected: false
+        })).filter(e => e.empID && e.name);
+        renderList();
+        status.textContent = `Loaded ${employees.length} entries`;
+      }});
+    });
 
-  downloadZip.addEventListener('click', async ()=> {
-    const zip = new JSZip();
-    // XLSX rows
-    const rows = [['EmpID','Name','Mail','Bus','QR_File']];
-    for(let i=0;i<employees.length;i++){
-      const e = employees[i];
-      const fname = sanitize(`${e.name}_${e.empID}.png`);
-      rows.push([e.empID,e.name,e.mail,e.bus,fname]);
-      if(!e.qrDataUrl){
-        e.qrDataUrl = await QRCode.toDataURL(JSON.stringify({employeeID:e.empID,employeeName:e.name,mail:e.mail,bus:e.bus}), { width:360, margin:1});
-      }
-      const base64 = e.qrDataUrl.split(',')[1];
-      zip.file(fname, base64, { base64:true });
-    }
-    const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(rows); XLSX.utils.book_append_sheet(wb,ws,'Employees');
-    const wbout = XLSX.write(wb,{bookType:'xlsx',type:'array'});
-    zip.file('employees.xlsx', wbout);
-    const blob = await zip.generateAsync({type:'blob'});
-    saveAs(blob, 'QR_Employees.zip');
-  });
+    function renderList(){
+      qrPreview.innerHTML=''; empTableBody.innerHTML='';
+      employees.forEach((e,i)=>{
+        const card = document.createElement('div'); card.className='qr-card';
+        card.innerHTML = `<div style="font-size:13px"><strong>${escapeHtml(e.name)}</strong><br><small>${escapeHtml(e.empID)}</small><br><small>${escapeHtml(e.mail)}</small><br><small>${escapeHtml(e.bus)}</small></div><div id="img-${i}">[QR]</div>
+          <div style="margin-top:6px"><button onclick="genOne(${i})" class="small-btn">Gen</button><button onclick="dlOne(${i})" class="small-btn">DL</button></div>`;
+        qrPreview.appendChild(card);
 
-  addBtn.addEventListener('click', ()=> {
-    const id = document.getElementById('newEmp').value.trim(); const name = document.getElementById('newName').value.trim();
-    const mail = document.getElementById('newMail').value.trim(); const bus = document.getElementById('newBus').value;
-    if(!id || !name){ alert('EmpID and Name required'); return; }
-    employees.push({ empID:id, name, mail, bus, qrDataUrl:null, selected:false});
-    renderList(); document.getElementById('newEmp').value=''; document.getElementById('newName').value=''; document.getElementById('newMail').value='';
-  });
-
-  saveAll.addEventListener('click', async ()=>{
-    if(!employees.length){ alert('No entries to save'); return; }
-    status.textContent = 'Saving to Firestore...';
-    try {
-      const batch = writeBatch(db);
-      employees.forEach(e=>{
-        const ref = doc(db,'employees', e.empID);
-        batch.set(ref, { employeeID:e.empID, employeeName:e.name, mail:e.mail, bus:e.bus });
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td><input type="checkbox" onchange="toggleSel(${i},this.checked)"></td><td>${escapeHtml(e.empID)}</td><td>${escapeHtml(e.name)}</td><td>${escapeHtml(e.mail)}</td><td>${escapeHtml(e.bus)}</td>`;
+        empTableBody.appendChild(tr);
       });
-      await batch.commit();
-      status.textContent = 'Saved employees metadata';
-      alert('Saved to Firestore');
-    } catch(err) { console.error(err); alert('Save failed: '+ err.message); status.textContent=''; }
-  });
+    }
 
-  delSelected.addEventListener('click', async ()=> {
-    const sel = employees.map((e,i)=> e.selected ? i : -1).filter(i=>i>=0);
-    if(!sel.length){ alert('Select entries first'); return; }
-    if(!confirm(`Delete ${sel.length} selected entries from local list? (This does not delete from Firestore)`)) return;
-    // remove from employees array by index (reverse order)
-    sel.sort((a,b)=>b-a).forEach(i=> employees.splice(i,1));
-    renderList();
-  });
+    window.toggleSel = (i,val)=> employees[i].selected = val;
 
-  delAll.addEventListener('click', async ()=> {
-    if(!confirm('Delete ALL employees docs from Firestore? This cannot be undone.')) return;
-    status.textContent = 'Deleting all employees from Firestore...';
-    try {
-      const col = collection(db,'employees');
-      while(true){
-        const q = query(col, limit(400));
-        const snap = await getDocs(q);
-        if(snap.empty) break;
-        const batch = writeBatch(db);
-        snap.docs.forEach(d => batch.delete(d.ref));
-        await batch.commit();
+    window.genOne = async (i) => {
+      const e = employees[i];
+      const payload = JSON.stringify({ employeeID: e.empID, employeeName: e.name, mail: e.mail, bus: e.bus });
+      e.qrDataUrl = await QRCode.toDataURL(payload, { width:360, margin:1 });
+      document.getElementById('img-'+i).innerHTML = `<img src="${e.qrDataUrl}" style="width:140px;height:140px">`;
+      downloadZip.style.display='inline-block';
+    };
+
+    window.dlOne = async (i) => {
+      if(!employees[i].qrDataUrl) await window.genOne(i);
+      const blob = dataURLtoBlob(employees[i].qrDataUrl);
+      const fname = sanitize(`${employees[i].name}_${employees[i].empID}.png`);
+      saveAs(blob, fname);
+    };
+
+    genAll.addEventListener('click', async ()=> {
+      if(!employees.length){ alert('No entries'); return; }
+      status.textContent = 'Generating QR...';
+      for(let i=0;i<employees.length;i++){
+        if(!employees[i].qrDataUrl){
+          const p = JSON.stringify({ employeeID: employees[i].empID, employeeName: employees[i].name, mail: employees[i].mail, bus: employees[i].bus });
+          employees[i].qrDataUrl = await QRCode.toDataURL(p, { width:360, margin:1 });
+          document.getElementById('img-'+i).innerHTML = `<img src="${employees[i].qrDataUrl}" style="width:140px;height:140px">`;
+        }
       }
-      status.textContent = 'All employees removed';
-      alert('Deleted all employee docs');
-    } catch(err){console.error(err); alert('Delete failed: '+err.message); status.textContent='';}
-  });
+      status.textContent = 'Generated QR for all';
+      downloadZip.style.display='inline-block';
+    });
 
-  logout.addEventListener('click', ()=> { localStorage.removeItem('admin_logged_in'); window.location.href='../admin-login.html'; });
+    downloadZip.addEventListener('click', async ()=> {
+      if(!employees.length){ alert('No entries'); return; }
+      const zip = new JSZip();
+      const rows = [['EmpID','Name','Mail','Bus','QR_File']];
+      for(let i=0;i<employees.length;i++){
+        const e = employees[i];
+        const fname = sanitize(`${e.name}_${e.empID}.png`);
+        rows.push([e.empID,e.name,e.mail,e.bus,fname]);
+        if(!e.qrDataUrl){
+          e.qrDataUrl = await QRCode.toDataURL(JSON.stringify({employeeID:e.empID,employeeName:e.name,mail:e.mail,bus:e.bus}), { width:360, margin:1});
+        }
+        const base64 = e.qrDataUrl.split(',')[1];
+        zip.file(fname, base64, { base64:true });
+      }
+      const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(rows); XLSX.utils.book_append_sheet(wb,ws,'Employees');
+      const wbout = XLSX.write(wb,{bookType:'xlsx',type:'array'});
+      zip.file('employees.xlsx', wbout);
+      const blob = await zip.generateAsync({type:'blob'});
+      saveAs(blob, 'QR_Employees.zip');
+    });
 
-  // helpers
-  function dataURLtoBlob(dataURL){ const parts = dataURL.split(','); const bstr = atob(parts[1]); let n=bstr.length; const u8=new Uint8Array(n); while(n--) u8[n]=bstr.charCodeAt(n); return new Blob([u8], { type:'image/png' }); }
-  function sanitize(s){ return s.replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_\-\.]/g,''); }
+    addBtn.addEventListener('click', ()=> {
+      const id = document.getElementById('newEmp').value.trim(); const name = document.getElementById('newName').value.trim();
+      const mail = document.getElementById('newMail').value.trim(); const bus = document.getElementById('newBus').value;
+      if(!id || !name){ alert('EmpID and Name required'); return; }
+      employees.push({ empID:id, name, mail, bus, qrDataUrl:null, selected:false});
+      renderList(); document.getElementById('newEmp').value=''; document.getElementById('newName').value=''; document.getElementById('newMail').value='';
+    });
+
+    saveAll.addEventListener('click', async ()=> {
+      if(!employees.length){ alert('No entries to save'); return; }
+      status.textContent = 'Saving to Firestore...';
+      try {
+        const batch = writeBatch(db);
+        employees.forEach(e=>{
+          const ref = doc(db,'employees', e.empID);
+          batch.set(ref, { employeeID:e.empID, employeeName:e.name, mail:e.mail, bus:e.bus });
+        });
+        await batch.commit();
+        status.textContent = 'Saved employees metadata';
+        alert('Saved to Firestore');
+      } catch(err) { console.error(err); alert('Save failed: '+ err.message); status.textContent=''; }
+    });
+
+    delSelected.addEventListener('click', async ()=> {
+      const selIdx = employees.reduce((acc,e,i)=> e.selected ? acc.concat(i) : acc, []);
+      if(!selIdx.length){ alert('Select entries first'); return; }
+      if(!confirm(`Delete ${selIdx.length} selected entries from local list? This does not delete Firestore docs.`)) return;
+      selIdx.sort((a,b)=>b-a).forEach(i=> employees.splice(i,1));
+      renderList();
+    });
+
+    delAll.addEventListener('click', async ()=> {
+      if(!confirm('Delete ALL documents in employees collection in Firestore? This cannot be undone.')) return;
+      status.textContent = 'Deleting all employees from Firestore...';
+      try {
+        const col = collection(db,'employees');
+        while(true){
+          const q = query(col, limit(400));
+          const snap = await getDocs(q);
+          if(snap.empty) break;
+          const batch = writeBatch(db);
+          snap.docs.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+        status.textContent = 'All employees removed';
+        alert('Deleted all employee docs');
+      } catch(err){ console.error(err); alert('Delete failed: '+err.message); status.textContent='';}
+    });
+
+    logout.addEventListener('click', async ()=> {
+      await signOut(auth);
+      window.location.href = '../admin-login.html';
+    });
+
+    // utilities
+    function dataURLtoBlob(dataURL){ const parts = dataURL.split(','); const bstr = atob(parts[1]); let n=bstr.length; const u8=new Uint8Array(n); while(n--) u8[n]=bstr.charCodeAt(n); return new Blob([u8], { type:'image/png' }); }
+    function sanitize(s){ return (s||'').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_\-\.]/g,''); }
+    function escapeHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   </script>
 </body>
 </html>

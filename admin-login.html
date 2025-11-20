@@ -1,44 +1,48 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Admin Login</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="header">
-    <div class="nav"><a href="index.html">Dashboard</a><a href="qr-generator/index.html">QR Generator</a><a href="scanner/index.html">Scanner</a></div>
-  </div>
-  <div class="container">
-    <h2>Admin Login</h2>
-    <p class="hint">Enter PIN to enable admin actions (clear, delete, save employees).</p>
-    <input id="pin" type="password" placeholder="Admin PIN">
-    <div style="height:12px"></div>
-    <button id="loginBtn" class="small-btn">Login</button>
-    <p id="msg" class="hint" style="color:red;display:none"></p>
+    <div class="nav"><a href="dashboard/index.html">Dashboard</a><a href="qr-generator/index.html">QR Generator</a><a href="scanner/index.html">Scanner</a></div>
   </div>
 
-<script>
-/* Replace with your computed SHA256 hex of PIN */
-const STORED_HASH = "8529b9b331e858239ee4975b602456e7e58da5523ed0a9f331a96d499301628b";
+  <div class="container" style="max-width:420px;margin:auto;">
+    <h2>Admin Sign In</h2>
+    <p class="hint">Sign in with the admin email you created in Firebase Authentication.</p>
 
-async function sha256(message){
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(message));
-  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-}
-document.getElementById('loginBtn').addEventListener('click', async ()=>{
-  const v = document.getElementById('pin').value || '';
-  const h = await sha256(v);
-  if(h === STORED_HASH){
-    localStorage.setItem('admin_logged_in','true');
-    // redirect to generator
-    window.location.href = 'qr-generator/index.html';
-  } else {
-    const msg = document.getElementById('msg');
-    msg.style.display='block'; msg.textContent='Incorrect PIN';
-    setTimeout(()=>msg.style.display='none',2500);
-  }
-});
-</script>
+    <input id="email" type="email" placeholder="admin@example.com">
+    <input id="password" type="password" placeholder="Password" style="margin-top:8px;">
+    <div style="height:8px"></div>
+    <button id="signInBtn" class="small-btn">Sign In</button>
+    <div id="msg" class="hint" style="color:var(--danger);display:none"></div>
+  </div>
+
+  <script type="module">
+    import { auth } from './firebase.js';
+    import { signInWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+    const emailEl = document.getElementById('email'), pwEl = document.getElementById('password'), btn = document.getElementById('signInBtn'), msg = document.getElementById('msg');
+
+    btn.addEventListener('click', async ()=>{
+      try {
+        await signInWithEmailAndPassword(auth, emailEl.value.trim(), pwEl.value);
+        // onAuthStateChanged will redirect
+      } catch(err){
+        msg.style.display='block'; msg.textContent = err.message;
+      }
+    });
+
+    onAuthStateChanged(auth, user => {
+      if(user) {
+        // signed in -> go to generator
+        window.location.href = 'qr-generator/index.html';
+      }
+    });
+  </script>
 </body>
 </html>

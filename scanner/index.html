@@ -7,16 +7,19 @@
 </head>
 <body>
   <div class="header">
-    <div class="nav"><a href="../index.html">Dashboard</a><a href="../qr-generator/index.html">QR Generator</a><a href="./index.html">Scanner</a></div>
+    <div class="nav"><a href="../dashboard/index.html">Dashboard</a><a href="../qr-generator/index.html">QR Generator</a><a href="./index.html">Scanner</a></div>
   </div>
+
   <div class="container">
     <h2>Attendance Scanner</h2>
-    <p class="hint">Select volunteer or device name (optional), then Start Camera</p>
+    <p class="hint">Select scanner name (optional), then Start Camera and point to QR on someone's badge.</p>
+
     <div class="controls">
-      <select id="scannerName"><option>Volunteer 1</option><option>Volunteer 2</option></select>
+      <select id="scannerName"><option>Volunteer 1</option><option>Volunteer 2</option><option>Volunteer 3</option></select>
       <button id="startBtn" class="small-btn">Start Camera</button>
       <button id="stopBtn" class="small-btn">Stop Camera</button>
     </div>
+
     <video id="video" style="width:100%;max-width:480px;margin-top:12px" autoplay muted playsinline></video>
     <div id="status" class="hint"></div>
   </div>
@@ -25,48 +28,58 @@
   <script type="module" src="../firebase.js"></script>
 
   <script type="module">
-  import { db } from '../firebase.js';
-  import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { db } from '../firebase.js';
+    import { addDoc, collection, doc, getDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-  const startBtn = document.getElementById('startBtn'), stopBtn = document.getElementById('stopBtn'), video = document.getElementById('video'), status = document.getElementById('status');
-  let stream=null, scanning=false, last='';
+    const startBtn = document.getElementById('startBtn'), stopBtn = document.getElementById('stopBtn'), video = document.getElementById('video'), status = document.getElementById('status');
 
-  startBtn.onclick = async () => {
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode:'environment' } });
-      video.srcObject = stream; video.play(); scanning = true; last='';
-      tick();
-      status.textContent = 'Camera started';
-    } catch(err){ alert('Camera error: '+err.message); }
-  };
-  stopBtn.onclick = ()=> { if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;} scanning=false; video.srcObject=null; status.textContent='Camera stopped'; };
+    let stream=null, scanning=false, last='';
 
-  function tick(){
-    if(!scanning) return;
-    const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight; ctx.drawImage(video,0,0,canvas.width,canvas.height);
-    const idata = ctx.getImageData(0,0,canvas.width,canvas.height);
-    const code = jsQR(idata.data, canvas.width, canvas.height, { inversionAttempts: 'attemptBoth' });
-    if(code && code.data){
-      if(code.data !== last){ last = code.data; processQR(code.data); setTimeout(()=> last='', 1500); }
+    startBtn.onclick = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode:'environment' } });
+        video.srcObject = stream; video.play(); scanning = true; last='';
+        tick();
+        status.textContent = 'Camera started';
+      } catch(err){ alert('Camera error: '+err.message); }
+    };
+
+    stopBtn.onclick = ()=> { if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;} scanning=false; video.srcObject=null; status.textContent='Camera stopped'; };
+
+    function tick(){
+      if(!scanning) return;
+      const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight; ctx.drawImage(video,0,0,canvas.width,canvas.height);
+      const idata = ctx.getImageData(0,0,canvas.width,canvas.height);
+      const code = jsQR(idata.data, canvas.width, canvas.height, { inversionAttempts: 'attemptBoth' });
+      if(code && code.data){
+        if(code.data !== last){ last = code.data; processQR(code.data); setTimeout(()=> last='', 1800); }
+      }
+      requestAnimationFrame(tick);
     }
-    requestAnimationFrame(tick);
-  }
 
-  async function processQR(raw){
-    let parsed;
-    try{ parsed = JSON.parse(raw); }catch(e){ status.textContent = 'Invalid QR'; return; }
-    const id = parsed.employeeID || parsed.empID;
-    const name = parsed.employeeName || parsed.name; const mail = parsed.mail || ''; const bus = parsed.bus || 'Bus 1';
-    if(!id || !name){ status.textContent = 'QR missing fields'; return; }
-    const ref = doc(db,'attendance', id);
-    const snap = await getDoc(ref);
-    if(snap.exists()){ status.textContent = `${name} already marked`; return; }
-    try {
-      await setDoc(ref, { employeeID:id, employeeName:name, mail, bus, timestamp: new Date().toISOString(), scannedBy: document.getElementById('scannerName').value });
-      status.textContent = `Marked: ${name} (${bus})`;
-    } catch(err){ console.error(err); status.textContent='Save error: '+err.message; }
-  }
+    async function processQR(raw){
+      let parsed;
+      try{ parsed = JSON.parse(raw); }catch(e){ status.textContent = 'Invalid QR'; return; }
+      const id = parsed.employeeID || parsed.empID || parsed.id;
+      const name = parsed.employeeName || parsed.name;
+      const mail = parsed.mail || '';
+      const bus = parsed.bus || 'Bus 1';
+      if(!id || !name){ status.textContent = 'QR missing required fields'; return; }
+
+      // prevent duplicates: we can store one doc per employee in checkins by setting doc id as empID (or allow many events with addDoc)
+      // We'll store as doc with empID so duplicates are prevented
+      const docRef = doc(db, 'checkins', id);
+      const snap = await getDoc(docRef);
+      if(snap.exists()){
+        status.textContent = `${name} already marked`;
+        return;
+      }
+      try {
+        await setDoc(docRef, { employeeID:id, employeeName:name, mail, bus, timestamp: new Date().toISOString(), scannedBy: document.getElementById('scannerName').value });
+        status.textContent = `Marked: ${name} — ${bus}`;
+      } catch(err){ console.error(err); status.textContent = 'Save error: '+err.message; }
+    }
   </script>
 </body>
 </html>

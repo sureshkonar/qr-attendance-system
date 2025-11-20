@@ -1,123 +1,81 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Attendance Dashboard</title>
-  <style>
-    body{font-family:Arial;background:#f5f7fb;padding:14px}
-    .wrap{max-width:1100px;margin:auto;background:#fff;padding:16px;border-radius:10px}
-    .top{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-    .card{padding:12px;border-radius:8px;background:#e9f0ff}
-    #search{padding:8px;border-radius:6px;border:1px solid #ccc;flex:1}
-    table{width:100%;border-collapse:collapse;margin-top:12px}
-    th,td{padding:8px;border-bottom:1px solid #eee;text-align:left}
-    th{background:#007bff;color:#fff}
-    .busRow{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
-    .busCard{background:#f1f7ff;padding:10px;border-radius:8px;min-width:120px}
-    .exportBtn{padding:8px 12px;background:#28a745;color:white;border-radius:6px;border:0;cursor:pointer}
-  </style>
+  <link rel="stylesheet" href="../styles.css">
 </head>
 <body>
-<div class="wrap">
-  <h2>Attendance Dashboard</h2>
-
-  <div class="top">
-    <input id="search" placeholder="Search by name or ID..."/>
-    <button id="exportBtn" class="exportBtn">Export Attendance (XLSX)</button>
-    <button id="refreshBtn">Refresh</button>
+  <div class="header">
+    <div class="nav"><a href="../dashboard/index.html">Dashboard</a><a href="../qr-generator/index.html">QR Generator</a><a href="../scanner/index.html">Scanner</a></div>
   </div>
 
-  <div style="margin-top:12px" id="summary">
-    <div style="display:flex;gap:12px;flex-wrap:wrap">
-      <div class="card"><strong>Total Present</strong><div id="total" style="font-size:20px">0</div></div>
-      <div class="card"><strong>Unique Buses</strong><div id="buscount" style="font-size:20px">0</div></div>
+  <div class="container">
+    <h2>Attendance Dashboard</h2>
+
+    <div class="controls">
+      <input id="search" placeholder="Search name or id">
+      <button id="export" class="small-btn">Export XLSX</button>
     </div>
+
+    <div id="summary" style="margin-top:12px" class="hint"></div>
+    <div id="busCards" style="display:flex;gap:10px;margin-top:12px"></div>
+
+    <table class="table"><thead><tr><th>EmpID</th><th>Name</th><th>Mail</th><th>Bus</th><th>Timestamp</th><th>ScannedBy</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
   </div>
 
-  <div class="busRow" id="busCards"></div>
+  <script type="module" src="../firebase.js"></script>
+  <script type="module">
+    import { db } from '../firebase.js';
+    import { collection, onSnapshot, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-  <table>
-    <thead><tr><th>Employee ID</th><th>Name</th><th>Mail</th><th>Bus</th><th>Timestamp</th><th>ScannedBy</th></tr></thead>
-    <tbody id="tbody"></tbody>
-  </table>
-</div>
+    const tbody = document.getElementById('tbody'), summary = document.getElementById('summary'), busCards = document.getElementById('busCards'), search = document.getElementById('search'), exportBtn = document.getElementById('export');
 
-<script type="module" src="../firebase.js"></script>
-<script type="module">
-import { db } from '../firebase.js';
-import { collection, onSnapshot, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    let latest = [];
 
-const tbody = document.getElementById('tbody');
-const totalEl = document.getElementById('total');
-const busCards = document.getElementById('busCards');
-const buscount = document.getElementById('buscount');
-const search = document.getElementById('search');
-const exportBtn = document.getElementById('exportBtn');
+    // Listen to checkins collection in real-time
+    onSnapshot(collection(db, 'checkins'), snapshot => {
+      latest = [];
+      snapshot.forEach(doc => latest.push(doc.data()));
+      render(latest);
+    });
 
-let latest = []; // array of attendance entries
+    function render(rows){
+      tbody.innerHTML=''; busCards.innerHTML=''; const map = {};
+      rows.sort((a,b)=> new Date(b.timestamp) - new Date(a.timestamp));
+      rows.forEach(r=> {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.employeeID}</td><td>${r.employeeName}</td><td>${r.mail||''}</td><td>${r.bus}</td><td>${new Date(r.timestamp).toLocaleString()}</td><td>${r.scannedBy||''}</td>`;
+        tbody.appendChild(tr);
+        map[r.bus] = (map[r.bus]||0) + 1;
+      });
+      summary.textContent = `Total present: ${rows.length}`;
+      Object.keys(map).sort().forEach(b => {
+        const el = document.createElement('div'); el.className='card'; el.style.padding='10px'; el.innerHTML = `<strong>${b}</strong><div style="font-size:18px">${map[b]}</div>`; busCards.appendChild(el);
+      });
+    }
 
-function render(rows) {
-  tbody.innerHTML = '';
-  const busMap = {};
-  rows.forEach(r => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.employeeID}</td><td>${r.employeeName}</td><td>${r.mail||''}</td><td>${r.bus}</td><td>${new Date(r.timestamp).toLocaleString()}</td><td>${r.scannedBy||''}</td>`;
-    tbody.appendChild(tr);
-    busMap[r.bus] = (busMap[r.bus] || 0) + 1;
-  });
-  totalEl.textContent = rows.length;
-  busCards.innerHTML = '';
-  Object.keys(busMap).sort().forEach(b => {
-    const div = document.createElement('div');
-    div.className = 'busCard';
-    div.innerHTML = `<strong>${b}</strong><div style="font-size:18px">${busMap[b]}</div>`;
-    busCards.appendChild(div);
-  });
-  buscount.textContent = Object.keys(busMap).length;
-}
+    search.addEventListener('input', ()=> {
+      const q = search.value.trim().toLowerCase();
+      if(!q) return render(latest);
+      render(latest.filter(r => (r.employeeName||'').toLowerCase().includes(q) || (r.employeeID||'').toLowerCase().includes(q)));
+    });
 
-onSnapshot(collection(db, 'attendance'), snapshot => {
-  const arr = [];
-  snapshot.forEach(doc => arr.push(doc.data()));
-  latest = arr.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-  applyFilter();
-});
+    exportBtn.addEventListener('click', async () => {
+      if(!latest.length){ alert('No data'); return; }
+      const rows = [['EmpID','Name','Mail','Bus','Timestamp','ScannedBy']];
+      latest.forEach(r=> rows.push([r.employeeID, r.employeeName, r.mail||'', r.bus, r.timestamp, r.scannedBy||'']));
+      const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(rows); XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
+      const wbout = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+      const blob = new Blob([wbout], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'attendance_export.xlsx'; a.click(); URL.revokeObjectURL(url);
+    });
 
-function applyFilter(){
-  const q = search.value.trim().toLowerCase();
-  if (!q) { render(latest); return; }
-  const filtered = latest.filter(r => (r.employeeID||'').toLowerCase().includes(q) || (r.employeeName||'').toLowerCase().includes(q));
-  render(filtered);
-}
-
-search.addEventListener('input', applyFilter);
-
-exportBtn.addEventListener('click', async () => {
-  if (!latest.length) { alert('No records to export'); return; }
-  // create workbook
-  const rows = [['EmpID','Name','Mail','Bus','Timestamp','ScannedBy']];
-  latest.forEach(r => rows.push([r.employeeID, r.employeeName, r.mail||'', r.bus, r.timestamp, r.scannedBy||'']));
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
-  const wbout = XLSX.write(wb, { bookType:'xlsx', type:'array' });
-  const blob = new Blob([wbout], { type: 'application/octet-stream' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'attendance_export.xlsx'; a.click();
-  setTimeout(()=> URL.revokeObjectURL(url), 10000);
-});
-
-// refresh (manual)
-document.getElementById('refreshBtn').addEventListener('click', () => { /* onSnapshot is live; nothing to do */ alert('Live updates are automatic'); });
-
-// import XLSX library
-import "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-</script>
-<!-- Include Firebase scripts -->
-<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js"></script>
-<script src="../firebase.js"></script>
-
+    // Import XLSX lib
+    import("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+  </script>
 </body>
 </html>
