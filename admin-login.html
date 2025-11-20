@@ -1,66 +1,44 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Admin Login</title>
-  <style>
-    body{font-family:Arial;margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#f3f4f6}
-    .box{width:320px;background:#fff;padding:20px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,0.08);text-align:center}
-    input{width:100%;padding:10px;margin-top:12px;border-radius:6px;border:1px solid #ccc;font-size:15px}
-    button{width:100%;padding:10px;margin-top:12px;border:0;border-radius:6px;background:#007bff;color:#fff;font-size:15px;cursor:pointer}
-    .msg{margin-top:10px;color:#d00;display:none}
-    .hint{font-size:13px;color:#666;margin-top:8px}
-  </style>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="box">
+  <div class="header">
+    <div class="nav"><a href="index.html">Dashboard</a><a href="qr-generator/index.html">QR Generator</a><a href="scanner/index.html">Scanner</a></div>
+  </div>
+  <div class="container">
     <h2>Admin Login</h2>
-    <input id="pinInput" type="password" placeholder="Enter Admin PIN (example: 1234)">
-    <button id="loginBtn">Login</button>
-    <p id="msg" class="msg">Incorrect PIN</p>
-    <p class="hint">This uses a simple client-side PIN. After successful login you'll be redirected to admin generator.</p>
+    <p class="hint">Enter PIN to enable admin actions (clear, delete, save employees).</p>
+    <input id="pin" type="password" placeholder="Admin PIN">
+    <div style="height:12px"></div>
+    <button id="loginBtn" class="small-btn">Login</button>
+    <p id="msg" class="hint" style="color:red;display:none"></p>
   </div>
 
 <script>
-/*
-  Simple hashed-PIN check:
-  - Choose a PIN (e.g. "1234")
-  - Generate SHA-256 hash (we will compare hash client-side)
-  - Replace STORED_HASH with that hex string
-  - This keeps the raw PIN out of code reading at a glance (better than plain text).
-*/
+/* Replace with your computed SHA256 hex of PIN */
+const STORED_HASH = "8529b9b331e858239ee4975b602456e7e58da5523ed0a9f331a96d499301628b";
 
-// Replace this with SHA-256 hash of your chosen PIN.
-// Example: If PIN is "1234", compute SHA256("1234") and paste here.
-const STORED_HASH = "8529b9b331e858239ee4975b602456e7e58da5523ed0a9f331a96d499301628b"; // <-- replace
-
-async function sha256(message) {
-  const msgBuffer = new TextEncoder().encode(message);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+async function sha256(message){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(message));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
-
-document.getElementById('loginBtn').addEventListener('click', async () => {
-  const pin = document.getElementById('pinInput').value || '';
-  const msg = document.getElementById('msg');
-  const h = await sha256(pin);
-  if (h === STORED_HASH) {
-    // set admin flag (simple session)
+document.getElementById('loginBtn').addEventListener('click', async ()=>{
+  const v = document.getElementById('pin').value || '';
+  const h = await sha256(v);
+  if(h === STORED_HASH){
     localStorage.setItem('admin_logged_in','true');
-    // redirect to QR generator (admin area)
-    window.location.href = './qr-generator/index.html';
+    // redirect to generator
+    window.location.href = 'qr-generator/index.html';
   } else {
-    msg.style.display = 'block';
-    setTimeout(()=> msg.style.display='none', 2500);
+    const msg = document.getElementById('msg');
+    msg.style.display='block'; msg.textContent='Incorrect PIN';
+    setTimeout(()=>msg.style.display='none',2500);
   }
 });
 </script>
-<!-- Include Firebase scripts -->
-<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js"></script>
-<script src="./firebase.js"></script>
-
 </body>
 </html>

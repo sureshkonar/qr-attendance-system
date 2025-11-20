@@ -1,6 +1,4 @@
-// firebase.js (module) - place in repo root
-// IMPORTANT: Replace firebaseConfig values with your project's config.
-
+// firebase.js (module) — replace config below with your Firebase project's config
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
@@ -16,5 +14,4 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// Export Firestore DB for other modules
 export { db };

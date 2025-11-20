@@ -1,132 +1,72 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Attendance Scanner</title>
-  <style>
-    body{font-family:Arial;background:#f6f8fa;padding:14px;text-align:center}
-    .card{max-width:720px;margin:auto;background:#fff;padding:14px;border-radius:10px}
-    #video{width:100%;max-width:480px;border-radius:8px;background:#000}
-    .controls{margin-top:12px}
-    .btn{padding:10px 14px;border-radius:8px;border:0;background:#007bff;color:#fff;cursor:pointer;margin:6px}
-    #status{margin-top:12px}
-  </style>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Scanner</title>
+  <link rel="stylesheet" href="../styles.css">
 </head>
 <body>
-<div class="card">
-  <h2>Attendance Scanner</h2>
-  <div class="controls">
-    <button id="startBtn" class="btn">Start Camera</button>
-    <button id="stopBtn" class="btn" style="background:#6c757d">Stop Camera</button>
-    <select id="volunteerName" style="padding:8px;border-radius:6px">
-      <option value="">Volunteer (optional)</option>
-      <option>Volunteer 1</option><option>Volunteer 2</option><option>Volunteer 3</option>
-    </select>
+  <div class="header">
+    <div class="nav"><a href="../index.html">Dashboard</a><a href="../qr-generator/index.html">QR Generator</a><a href="./index.html">Scanner</a></div>
+  </div>
+  <div class="container">
+    <h2>Attendance Scanner</h2>
+    <p class="hint">Select volunteer or device name (optional), then Start Camera</p>
+    <div class="controls">
+      <select id="scannerName"><option>Volunteer 1</option><option>Volunteer 2</option></select>
+      <button id="startBtn" class="small-btn">Start Camera</button>
+      <button id="stopBtn" class="small-btn">Stop Camera</button>
+    </div>
+    <video id="video" style="width:100%;max-width:480px;margin-top:12px" autoplay muted playsinline></video>
+    <div id="status" class="hint"></div>
   </div>
 
-  <video id="video" autoplay playsinline></video>
-  <div id="status"></div>
-</div>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
+  <script type="module" src="../firebase.js"></script>
 
-<script src="https://cdn.jsdelivr.net/npm/jsqr/dist/jsQR.js"></script>
-<script type="module" src="../firebase.js"></script>
+  <script type="module">
+  import { db } from '../firebase.js';
+  import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-<script type="module">
-import { db } from '../firebase.js';
-import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  const startBtn = document.getElementById('startBtn'), stopBtn = document.getElementById('stopBtn'), video = document.getElementById('video'), status = document.getElementById('status');
+  let stream=null, scanning=false, last='';
 
-const startBtn = document.getElementById('startBtn');
-const stopBtn = document.getElementById('stopBtn');
-const video = document.getElementById('video');
-const statusDiv = document.getElementById('status');
+  startBtn.onclick = async () => {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode:'environment' } });
+      video.srcObject = stream; video.play(); scanning = true; last='';
+      tick();
+      status.textContent = 'Camera started';
+    } catch(err){ alert('Camera error: '+err.message); }
+  };
+  stopBtn.onclick = ()=> { if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;} scanning=false; video.srcObject=null; status.textContent='Camera stopped'; };
 
-let stream = null;
-let scanning = false;
-let lastData = '';
-
-startBtn.addEventListener('click', async () => {
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-    video.srcObject = stream;
-    scanning = true;
-    lastData = '';
-    tick();
-    statusDiv.textContent = 'Camera started. Point to QR';
-  } catch (err) {
-    alert('Camera access denied or not available: ' + err.message);
-  }
-});
-
-stopBtn.addEventListener('click', () => {
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-  scanning = false;
-  video.srcObject = null;
-  statusDiv.textContent = 'Camera stopped';
-});
-
-function tick(){
-  if (!scanning) return;
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-  ctx.drawImage(video,0,0,canvas.width,canvas.height);
-  const imgData = ctx.getImageData(0,0,canvas.width,canvas.height);
-  const code = jsQR(imgData.data, canvas.width, canvas.height, { inversionAttempts: 'attemptBoth' });
-  if (code && code.data) {
-    if (code.data !== lastData) {
-      lastData = code.data;
-      processScan(code.data);
-      setTimeout(()=> lastData = '', 1800); // allow same code again after timeout
+  function tick(){
+    if(!scanning) return;
+    const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight; ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    const idata = ctx.getImageData(0,0,canvas.width,canvas.height);
+    const code = jsQR(idata.data, canvas.width, canvas.height, { inversionAttempts: 'attemptBoth' });
+    if(code && code.data){
+      if(code.data !== last){ last = code.data; processQR(code.data); setTimeout(()=> last='', 1500); }
     }
-  }
-  requestAnimationFrame(tick);
-}
-
-async function processScan(raw) {
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch(e){
-    statusDiv.textContent = 'Invalid QR format';
-    return;
-  }
-  const empID = parsed.employeeID || parsed.empId || parsed.id;
-  const name = parsed.employeeName || parsed.employeeName || parsed.name;
-  const mail = parsed.mail || '';
-  const bus = parsed.bus || 'Bus 1';
-  const volunteer = document.getElementById('volunteerName').value || 'Volunteer';
-
-  if (!empID || !name) {
-    statusDiv.textContent = 'QR missing required fields';
-    return;
+    requestAnimationFrame(tick);
   }
 
-  const docRef = doc(db, 'attendance', empID);
-  const existing = await getDoc(docRef);
-  if (existing.exists()) {
-    statusDiv.textContent = `${name} (${empID}) — Already marked`;
-    return;
+  async function processQR(raw){
+    let parsed;
+    try{ parsed = JSON.parse(raw); }catch(e){ status.textContent = 'Invalid QR'; return; }
+    const id = parsed.employeeID || parsed.empID;
+    const name = parsed.employeeName || parsed.name; const mail = parsed.mail || ''; const bus = parsed.bus || 'Bus 1';
+    if(!id || !name){ status.textContent = 'QR missing fields'; return; }
+    const ref = doc(db,'attendance', id);
+    const snap = await getDoc(ref);
+    if(snap.exists()){ status.textContent = `${name} already marked`; return; }
+    try {
+      await setDoc(ref, { employeeID:id, employeeName:name, mail, bus, timestamp: new Date().toISOString(), scannedBy: document.getElementById('scannerName').value });
+      status.textContent = `Marked: ${name} (${bus})`;
+    } catch(err){ console.error(err); status.textContent='Save error: '+err.message; }
   }
-  try {
-    await setDoc(docRef, {
-      employeeID: empID,
-      employeeName: name,
-      mail: mail,
-      bus: bus,
-      timestamp: new Date().toISOString(),
-      scannedBy: volunteer
-    });
-    statusDiv.textContent = `Marked: ${name} — ${bus}`;
-  } catch (err) {
-    console.error(err);
-    statusDiv.textContent = 'Error saving attendance: ' + err.message;
-  }
-}
-</script>
-<!-- Include Firebase scripts -->
-<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js"></script>
-<script src="../firebase.js"></script>
-
+  </script>
 </body>
 </html>
